@@ -1,0 +1,13 @@
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+DerivedData/
+iosApp/**/*.xcuserdata/
+iosApp/**/*.xcuserstate
+androidApp/src/main/python/.venv/
+androidApp/src/main/python/__pycache__/
+androidApp/src/main/python/**/__pycache__/

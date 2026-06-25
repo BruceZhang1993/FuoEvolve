@@ -37,6 +37,34 @@ def _install_mpv_stub() -> None:
 
 _install_mpv_stub()
 
+
+def _patch_pydantic_v1() -> None:
+    """Provide the small pydantic v2 surface used by current FeelUOwn models."""
+    import pydantic
+
+    if not hasattr(pydantic, "ConfigDict"):
+        pydantic.ConfigDict = dict
+
+    if not hasattr(pydantic, "model_validator"):
+        from pydantic import root_validator
+
+        def model_validator(*, mode="after"):
+            return root_validator(pre=(mode == "before"), allow_reuse=True)
+
+        pydantic.model_validator = model_validator
+
+    if not hasattr(pydantic, "model_serializer"):
+        def model_serializer(*args, **kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
+        pydantic.model_serializer = model_serializer
+
+
+_patch_pydantic_v1()
+
 from feeluown.config import Config
 from feeluown.library import Library
 from feeluown.library.base import SearchType
@@ -102,6 +130,8 @@ class MobileAppContext:
     player: MobileNativePlayer
     task_mgr: MobileTaskManager
     has_gui: bool = False
+    mode: int = 0
+    GuiMode: int = 0x10
 
     def show_msg(self, msg, *args, **kwargs):
         self.last_message = str(msg)
@@ -119,7 +149,17 @@ class ProviderRegistry:
                 raise RuntimeError(f"provider module has no enable(app): {module_name}")
             if hasattr(module, "init_config"):
                 module.init_config(Config(module_name))
+            self._enable_without_auto_login(module)
+
+    def _enable_without_auto_login(self, module):
+        import feeluown.library.library as library_module
+
+        original_run_fn = library_module.run_fn
+        library_module.run_fn = lambda *args, **kwargs: None
+        try:
             module.enable(self.app)
+        finally:
+            library_module.run_fn = original_run_fn
 
 
 class FuoMobileBridge:

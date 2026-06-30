@@ -1,6 +1,7 @@
 package org.feeluown.mobile
 
 import android.content.Context
+import android.util.Log
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
@@ -11,27 +12,46 @@ import org.json.JSONObject
 class AndroidFuoCoreBridge(
     private val context: Context,
 ) : FuoCoreBridge {
+    @Volatile
     private var bridge: PyObject? = null
 
     override suspend fun initialize() {
         withContext(Dispatchers.IO) {
             if (bridge != null) return@withContext
-            val providers = context.assets.open("providers.json")
-                .bufferedReader()
-                .use { it.readText() }
-            bridge = Python.getInstance()
-                .getModule("fuo_mobile.bridge")
-                .callAttr("create_bridge", providers)
+            synchronized(this@AndroidFuoCoreBridge) {
+                if (bridge != null) return@synchronized
+                try {
+                    Log.d(TAG, "initialize start")
+                    val providers = context.assets.open("providers.json")
+                        .bufferedReader()
+                        .use { it.readText() }
+                    bridge = Python.getInstance()
+                        .getModule("fuo_mobile.bridge")
+                        .callAttr("create_bridge", providers)
+                    Log.d(TAG, "initialize done")
+                } catch (throwable: Throwable) {
+                    Log.e(TAG, "initialize failed", throwable)
+                    throw throwable
+                }
+            }
         }
     }
 
     override suspend fun search(keyword: String): List<FuoTrack> {
         initialize()
         return withContext(Dispatchers.IO) {
-            val raw = requireNotNull(bridge).callAttr("search", keyword).toString()
-            val array = JSONObject(raw).getJSONArray("tracks")
-            List(array.length()) { index ->
-                array.getJSONObject(index).toTrack()
+            try {
+                Log.d(TAG, "search start keyword=$keyword")
+                val raw = requireNotNull(bridge).callAttr("search", keyword).toString()
+                val array = JSONObject(raw).getJSONArray("tracks")
+                List(array.length()) { index ->
+                    array.getJSONObject(index).toTrack()
+                }.also {
+                    Log.d(TAG, "search done count=${it.size}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "search failed keyword=$keyword", throwable)
+                throw throwable
             }
         }
     }
@@ -39,8 +59,16 @@ class AndroidFuoCoreBridge(
     override suspend fun play(trackId: String): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
-            val raw = requireNotNull(bridge).callAttr("play", trackId).toString()
-            JSONObject(raw).toPayload()
+            try {
+                Log.d(TAG, "play start trackId=$trackId")
+                val raw = requireNotNull(bridge).callAttr("play", trackId).toString()
+                JSONObject(raw).toPayload().also {
+                    Log.d(TAG, "play done title=${it.title}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "play failed trackId=$trackId", throwable)
+                throw throwable
+            }
         }
     }
 
@@ -87,5 +115,9 @@ class AndroidFuoCoreBridge(
             result[key] = optString(key)
         }
         return result
+    }
+
+    private companion object {
+        private const val TAG = "FuoCoreBridge"
     }
 }

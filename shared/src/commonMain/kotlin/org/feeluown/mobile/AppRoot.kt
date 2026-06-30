@@ -13,14 +13,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -38,17 +42,28 @@ fun AppRoot(controller: FuoPlayerController) {
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     OutlinedTextField(
                         modifier = Modifier.weight(1f),
                         value = controller.query,
                         onValueChange = controller::onQueryChange,
                         singleLine = true,
                         label = { Text("搜索网易云音乐") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { controller.search() }),
                     )
-                    Button(onClick = controller::search) {
-                        Text("搜索")
+                    Button(
+                        enabled = controller.status != PlayerStatus.Loading,
+                        onClick = controller::search,
+                    ) {
+                        Text(if (controller.status == PlayerStatus.Loading) "搜索中" else "搜索")
                     }
+                }
+                if (controller.status == PlayerStatus.Loading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
                 Text(
                     text = controller.message,

@@ -3,7 +3,6 @@ package org.feeluown.mobile
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -116,7 +115,7 @@ class FuoPlaybackService : MediaSessionService() {
         }
 
         private fun start(context: Context, intent: Intent) {
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
     }
 }

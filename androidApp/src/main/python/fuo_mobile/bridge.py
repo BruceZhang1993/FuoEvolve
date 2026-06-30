@@ -74,6 +74,27 @@ from feeluown.player.base_player import AbstractPlayer, State
 from feeluown.utils.dispatch import Signal
 
 
+def _patch_feeluown_models_for_pydantic_v1() -> None:
+    import pydantic
+    import feeluown.library.models as models
+
+    if hasattr(pydantic, "field_validator"):
+        return
+
+    refs = {
+        name: value
+        for name, value in vars(models).items()
+        if name.endswith("Model") or name.startswith("T")
+    }
+    for model_cls in refs.values():
+        update_forward_refs = getattr(model_cls, "update_forward_refs", None)
+        if update_forward_refs is not None:
+            update_forward_refs(**refs)
+
+
+_patch_feeluown_models_for_pydantic_v1()
+
+
 class MobileConfig:
     AUDIO_SELECT_POLICY = "hq<>"
     ENABLE_AI_STANDBY_MATCHER = False
@@ -237,8 +258,8 @@ def song_to_dict(song) -> Dict[str, str]:
     return {
         "id": f"{source}:{identifier}",
         "title": display(song, "title"),
-        "artists": display(song, "artists_name"),
-        "album": display(song, "album_name"),
+        "artists": display_artists(song),
+        "album": display_album(song),
         "source": source,
     }
 
@@ -277,3 +298,22 @@ def display(model, field: str) -> str:
     if isinstance(value, (list, tuple)):
         return " / ".join(str(each) for each in value)
     return str(value or "")
+
+
+def display_artists(song) -> str:
+    artists_name = display(song, "artists_name")
+    if artists_name:
+        return artists_name
+    artists = getattr(song, "artists", []) or []
+    names = [display(artist, "name") for artist in artists]
+    return " / ".join(name for name in names if name)
+
+
+def display_album(song) -> str:
+    album_name = display(song, "album_name")
+    if album_name:
+        return album_name
+    album = getattr(song, "album", None)
+    if album is None:
+        return ""
+    return display(album, "name")

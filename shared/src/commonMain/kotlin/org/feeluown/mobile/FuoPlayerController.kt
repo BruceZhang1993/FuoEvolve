@@ -4,7 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class FuoPlayerController(
     private val core: FuoCoreBridge,
@@ -25,6 +27,7 @@ class FuoPlayerController(
     init {
         scope.launch {
             runCatching { core.initialize() }
+                .onSuccess { message = "网易云音乐已就绪" }
                 .onFailure { setError(it) }
         }
     }
@@ -41,7 +44,8 @@ class FuoPlayerController(
         }
         scope.launch {
             status = PlayerStatus.Loading
-            runCatching { core.search(keyword) }
+            message = "正在搜索：$keyword"
+            runCatching { withTimeout(20_000) { core.search(keyword) } }
                 .onSuccess {
                     tracks = it
                     status = current?.let { PlayerStatus.Paused } ?: PlayerStatus.Idle
@@ -101,6 +105,9 @@ class FuoPlayerController(
 
     private fun setError(throwable: Throwable) {
         status = PlayerStatus.Error
-        message = throwable.message ?: throwable::class.simpleName.orEmpty()
+        message = when (throwable) {
+            is TimeoutCancellationException -> "搜索超时，请检查网络后重试"
+            else -> throwable.message ?: throwable::class.simpleName.orEmpty()
+        }
     }
 }

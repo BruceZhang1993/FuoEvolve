@@ -18,6 +18,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.net.URL
 
 class AndroidDownloadRepository(
@@ -276,13 +277,15 @@ class AndroidDownloadRepository(
         val title = payload.title.ifBlank { track.title }
         val artists = payload.artists.ifBlank { track.artists }
         val album = payload.album.ifBlank { track.album }
-        if (title.isBlank() && artists.isBlank() && album.isBlank()) return
+        val coverImage = loadCoverImage(payload.coverUrl ?: track.coverUrl)
+        if (title.isBlank() && artists.isBlank() && album.isBlank() && coverImage == null) return
 
         val audioBytes = file.readBytes().stripId3v2Tag()
         val tagBytes = buildId3v23Tag(
             title = title,
             artists = artists,
             album = album,
+            coverImage = coverImage,
         )
         FileOutputStream(file, false).use { output ->
             output.write(tagBytes)
@@ -307,11 +310,17 @@ class AndroidDownloadRepository(
             (this[offset + 3].toInt() and 0x7F)
     }
 
-    private fun buildId3v23Tag(title: String, artists: String, album: String): ByteArray {
+    private fun buildId3v23Tag(
+        title: String,
+        artists: String,
+        album: String,
+        coverImage: CoverImage?,
+    ): ByteArray {
         val frames = ByteArrayOutputStream()
         frames.writeTextFrame("TIT2", title)
         frames.writeTextFrame("TPE1", artists)
         frames.writeTextFrame("TALB", album)
+        frames.writeApicFrame(coverImage)
         val frameBytes = frames.toByteArray()
         return ByteArrayOutputStream().apply {
             write(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0))
@@ -330,6 +339,89 @@ class AndroidDownloadRepository(
         writeInt32(body.size)
         write(byteArrayOf(0, 0))
         write(body)
+    }
+
+    private fun ByteArrayOutputStream.writeApicFrame(coverImage: CoverImage?) {
+        if (coverImage == null || coverImage.bytes.isEmpty()) return
+        val body = ByteArrayOutputStream().apply {
+            write(0)
+            write(coverImage.mimeType.encodeToByteArray())
+            write(0)
+            write(3)
+            write(0)
+            write(coverImage.bytes)
+        }.toByteArray()
+        write("APIC".encodeToByteArray())
+        writeInt32(body.size)
+        write(byteArrayOf(0, 0))
+        write(body)
+    }
+
+    private fun loadCoverImage(coverUrl: String?): CoverImage? {
+        val imageUrl = coverUrl?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            val uri = Uri.parse(imageUrl)
+            var contentType: String? = null
+            val bytes = when (uri.scheme) {
+                "content", "file" -> context.contentResolver.openInputStream(uri)?.use {
+                    it.readBytesLimited(MAX_COVER_BYTES)
+                }
+                "http", "https" -> {
+                    val connection = URL(imageUrl).openConnection()
+                    connection.connectTimeout = COVER_CONNECT_TIMEOUT_MS
+                    connection.readTimeout = COVER_READ_TIMEOUT_MS
+                    contentType = connection.contentType
+                    connection.getInputStream().use { it.readBytesLimited(MAX_COVER_BYTES) }
+                }
+                else -> null
+            } ?: return@runCatching null
+            CoverImage(
+                mimeType = imageMimeType(imageUrl, contentType, bytes),
+                bytes = bytes,
+            )
+        }.getOrNull()
+    }
+
+    private fun InputStream.readBytesLimited(maxBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) return ByteArray(0)
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    private fun imageMimeType(imageUrl: String, contentType: String?, bytes: ByteArray): String {
+        val normalizedContentType = contentType?.substringBefore(';')?.trim()?.lowercase()
+        if (normalizedContentType?.startsWith("image/") == true) return normalizedContentType
+        return when {
+            bytes.size >= 3 &&
+                bytes[0] == 0xFF.toByte() &&
+                bytes[1] == 0xD8.toByte() &&
+                bytes[2] == 0xFF.toByte() -> "image/jpeg"
+            bytes.size >= 8 &&
+                bytes[0] == 0x89.toByte() &&
+                bytes[1] == 'P'.code.toByte() &&
+                bytes[2] == 'N'.code.toByte() &&
+                bytes[3] == 'G'.code.toByte() -> "image/png"
+            bytes.size >= 12 &&
+                bytes[0] == 'R'.code.toByte() &&
+                bytes[1] == 'I'.code.toByte() &&
+                bytes[2] == 'F'.code.toByte() &&
+                bytes[3] == 'F'.code.toByte() &&
+                bytes[8] == 'W'.code.toByte() &&
+                bytes[9] == 'E'.code.toByte() &&
+                bytes[10] == 'B'.code.toByte() &&
+                bytes[11] == 'P'.code.toByte() -> "image/webp"
+            imageUrl.substringBefore('?').endsWith(".png", ignoreCase = true) -> "image/png"
+            imageUrl.substringBefore('?').endsWith(".webp", ignoreCase = true) -> "image/webp"
+            else -> "image/jpeg"
+        }
     }
 
     private fun ByteArrayOutputStream.writeInt32(value: Int) {
@@ -365,7 +457,15 @@ class AndroidDownloadRepository(
         val mimeType: String,
     )
 
+    private data class CoverImage(
+        val mimeType: String,
+        val bytes: ByteArray,
+    )
+
     private companion object {
         private const val ID3_HEADER_SIZE = 10
+        private const val MAX_COVER_BYTES = 5 * 1024 * 1024
+        private const val COVER_CONNECT_TIMEOUT_MS = 10_000
+        private const val COVER_READ_TIMEOUT_MS = 15_000
     }
 }

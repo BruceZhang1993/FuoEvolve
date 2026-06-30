@@ -2,6 +2,7 @@ package org.feeluown.mobile
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -54,12 +55,45 @@ actual fun PlatformCoverArt(
 
 private suspend fun loadCover(context: Context, imageUrl: String): ImageBitmap? = withContext(Dispatchers.IO) {
     val uri = Uri.parse(imageUrl)
+    when (uri.scheme) {
+        "fuo-cover" -> {
+            val albumArt = uri.getQueryParameter("albumArt").orEmpty()
+            val audio = uri.getQueryParameter("audio").orEmpty()
+            albumArt.takeIf { it.isNotBlank() }?.let { loadDirectCover(context, it) }
+                ?: audio.takeIf { it.isNotBlank() }?.let { loadEmbeddedCover(context, it) }
+        }
+        "content", "file" -> loadDirectCover(context, imageUrl) ?: loadEmbeddedCover(context, imageUrl)
+        "http", "https" -> loadDirectCover(context, imageUrl)
+        else -> null
+    }
+}
+
+private fun loadDirectCover(context: Context, imageUrl: String): ImageBitmap? {
+    val uri = Uri.parse(imageUrl)
     val bitmap = when (uri.scheme) {
         "content", "file" -> context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
         "http", "https" -> URL(imageUrl).openStream().use(BitmapFactory::decodeStream)
         else -> null
     }
-    bitmap?.asImageBitmap()
+    return bitmap?.asImageBitmap()
+}
+
+private fun loadEmbeddedCover(context: Context, imageUrl: String): ImageBitmap? {
+    val uri = Uri.parse(imageUrl)
+    val retriever = MediaMetadataRetriever()
+    return try {
+        when (uri.scheme) {
+            "content" -> retriever.setDataSource(context, uri)
+            "file" -> retriever.setDataSource(requireNotNull(uri.path))
+            else -> return null
+        }
+        val bytes = retriever.embeddedPicture ?: return null
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    } catch (_: Throwable) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
 }
 
 @Composable

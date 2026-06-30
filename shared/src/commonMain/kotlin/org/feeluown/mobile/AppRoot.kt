@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -35,7 +34,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +49,8 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
@@ -79,6 +79,10 @@ fun AppRoot(
         }
         if (controller.isSettingsOpen) {
             SettingsScreen(controller)
+            return@MaterialTheme
+        }
+        if (controller.isSearchOpen) {
+            SearchScreen(controller)
             return@MaterialTheme
         }
 
@@ -149,10 +153,6 @@ fun AppRoot(
                 }
             }
         }
-
-        if (controller.isSearchOpen) {
-            SearchDialog(controller)
-        }
     }
 }
 
@@ -163,15 +163,25 @@ private fun HomeSectionTabs(controller: FuoPlayerController) {
         HomeSection.Music to "音乐",
         HomeSection.Local to "本地音乐",
     )
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    val selectedIndex = sections.indexOfFirst { it.first == controller.homeSection }.coerceAtLeast(0)
+    TabRow(
+        selectedTabIndex = selectedIndex,
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.primary,
+    ) {
         sections.forEachIndexed { index, (section, label) ->
-            SegmentedButton(
+            Tab(
                 selected = controller.homeSection == section,
                 onClick = { controller.onHomeSectionChange(section) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = sections.size),
-            ) {
-                Text(label)
-            }
+                text = {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                },
+            )
         }
     }
 }
@@ -198,6 +208,25 @@ private fun EmptyHomeSection(modifier: Modifier, title: String) {
 
 @Composable
 private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifier) {
+    val displayTracks = remember(controller.localTracks, controller.localMusicViewMode) {
+        when (controller.localMusicViewMode) {
+            LocalMusicViewMode.All -> controller.localTracks.sortedWith(
+                compareBy<MusicTrack> { localTitleSectionOrder(localTitleSection(it.title)) }
+                    .thenBy { it.title.lowercase() }
+                    .thenBy { it.artists.lowercase() },
+            )
+            LocalMusicViewMode.Artist -> controller.localTracks.sortedWith(
+                compareBy<MusicTrack> { normalizedGroupName(it.artists, "未知歌手").lowercase() }
+                    .thenBy { it.album.lowercase() }
+                    .thenBy { it.title.lowercase() },
+            )
+            LocalMusicViewMode.Album -> controller.localTracks.sortedWith(
+                compareBy<MusicTrack> { normalizedGroupName(it.album, "未知专辑").lowercase() }
+                    .thenBy { it.artists.lowercase() }
+                    .thenBy { it.title.lowercase() },
+            )
+        }
+    }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -216,22 +245,103 @@ private fun LocalMusicSection(controller: FuoPlayerController, modifier: Modifie
                 Icon(Icons.Filled.Refresh, contentDescription = "刷新本地音乐")
             }
         }
+        LocalMusicViewModeTabs(controller)
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            itemsIndexed(controller.localTracks, key = { _, item -> item.id }) { index, track ->
-                TrackRow(
-                    track = track,
-                    downloadState = controller.downloadStates[track.id],
-                    onClick = { controller.playFromLocal(index) },
-                    onDownload = { controller.download(track) },
-                    onDeleteDownload = { controller.deleteDownload(track) },
-                )
-                HorizontalDivider()
+            if (displayTracks.isEmpty()) {
+                item {
+                    EmptyLocalMusicHint()
+                }
+            } else {
+                val groups = when (controller.localMusicViewMode) {
+                    LocalMusicViewMode.All -> displayTracks.groupBy { localTitleSection(it.title) }
+                    LocalMusicViewMode.Artist -> displayTracks.groupBy { normalizedGroupName(it.artists, "未知歌手") }
+                    LocalMusicViewMode.Album -> displayTracks.groupBy { normalizedGroupName(it.album, "未知专辑") }
+                }
+                groups.forEach { (section, tracks) ->
+                    item(key = "section:$section") {
+                        LocalMusicSectionHeader(title = section, count = tracks.size)
+                    }
+                    itemsIndexed(tracks, key = { _, item -> item.id }) { _, track ->
+                        TrackRow(
+                            track = track,
+                            downloadState = controller.downloadStates[track.id],
+                            onClick = { controller.playLocalTrack(track, displayTracks) },
+                            onDownload = { controller.download(track) },
+                            onDeleteDownload = { controller.deleteDownload(track) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocalMusicViewModeTabs(controller: FuoPlayerController) {
+    val modes = listOf(
+        LocalMusicViewMode.All to "全部",
+        LocalMusicViewMode.Artist to "歌手",
+        LocalMusicViewMode.Album to "专辑",
+    )
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        modes.forEachIndexed { index, (mode, label) ->
+            SegmentedButton(
+                selected = controller.localMusicViewMode == mode,
+                onClick = { controller.onLocalMusicViewModeChange(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+            ) {
+                Text(label)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicSectionHeader(title: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = "$count 首",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun EmptyLocalMusicHint() {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Text(
+            modifier = Modifier.padding(16.dp),
+            text = "未发现本地音乐",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -346,42 +456,82 @@ private fun PermissionPanel(onRequestAudioPermission: () -> Unit) {
 }
 
 @Composable
-private fun SearchDialog(controller: FuoPlayerController) {
-    AlertDialog(
-        onDismissRequest = controller::closeSearch,
-        title = { Text("搜索音乐") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextField(
-                    modifier = Modifier.fillMaxWidth(),
-                    value = controller.query,
-                    onValueChange = controller::onQueryChange,
-                    singleLine = true,
-                    placeholder = { Text("歌曲、歌手或专辑") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { controller.search() }),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SearchScopeChip(controller, SearchScope.All, "全部")
-                    SearchScopeChip(controller, SearchScope.Local, "本地")
-                    SearchScopeChip(controller, SearchScope.Provider, "Provider")
-                }
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !controller.isLoading,
-                    onClick = controller::search,
-                ) {
-                    if (!controller.isLoading) {
-                        Icon(Icons.Filled.Search, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                    }
-                    Text(if (controller.isLoading) "搜索中" else "搜索")
-                }
-                LazyColumn(
+private fun SearchScreen(controller: FuoPlayerController) {
+    Scaffold(
+        topBar = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 3.dp,
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 420.dp),
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = controller::closeSearch) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                        TextField(
+                            modifier = Modifier.weight(1f),
+                            value = controller.query,
+                            onValueChange = controller::onQueryChange,
+                            singleLine = true,
+                            placeholder = { Text("歌曲、歌手或专辑") },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { controller.search() }),
+                        )
+                        IconButton(
+                            enabled = !controller.isLoading,
+                            onClick = controller::search,
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = "搜索")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.padding(start = 56.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SearchScopeChip(controller, SearchScope.All, "全部")
+                        SearchScopeChip(controller, SearchScope.Local, "本地")
+                        SearchScopeChip(controller, SearchScope.Provider, "Provider")
+                    }
+                }
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (controller.isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            Text(
+                text = controller.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (controller.searchResults.isEmpty()) {
+                    item {
+                        EmptySearchHint(controller.query)
+                    }
+                } else {
                     itemsIndexed(controller.searchResults, key = { _, item -> item.id }) { index, track ->
                         TrackRow(
                             track = track,
@@ -394,13 +544,26 @@ private fun SearchDialog(controller: FuoPlayerController) {
                     }
                 }
             }
-        },
-        confirmButton = {
-            IconButton(onClick = controller::closeSearch) {
-                Icon(Icons.Filled.Close, contentDescription = "关闭搜索")
-            }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun EmptySearchHint(query: String) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Text(
+            modifier = Modifier.padding(16.dp),
+            text = if (query.isBlank()) "输入关键词搜索音乐" else "没有搜索结果",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -770,6 +933,20 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
         track.source.takeIf { it.isNotBlank() },
         state,
     ).joinToString(" · ")
+}
+
+private fun localTitleSection(title: String): String {
+    val first = title.trim().firstOrNull()?.uppercaseChar() ?: return "#"
+    return if (first in 'A'..'Z') first.toString() else "#"
+}
+
+private fun localTitleSectionOrder(section: String): Int {
+    val first = section.firstOrNull() ?: return 26
+    return if (first in 'A'..'Z') first - 'A' else 26
+}
+
+private fun normalizedGroupName(value: String, fallback: String): String {
+    return value.trim().ifBlank { fallback }
 }
 
 private fun formatMs(value: Long): String {

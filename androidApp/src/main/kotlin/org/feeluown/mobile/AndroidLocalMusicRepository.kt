@@ -67,7 +67,7 @@ class AndroidLocalMusicRepository(
                     album = cursor.getString(albumColumn).orEmpty(),
                     source = "local",
                     sourceType = sourceType,
-                    coverUrl = albumArtUri(albumId),
+                    coverUrl = localCoverUri(uri, albumId),
                     durationMs = cursor.getLong(durationColumn).takeIf { it > 0 },
                     localUri = uri.toString(),
                 )
@@ -98,6 +98,15 @@ private fun albumArtUri(albumId: Long): String? {
     return Uri.parse("content://media/external/audio/albumart")
         .buildUpon()
         .appendPath(albumId.toString())
+        .build()
+        .toString()
+}
+
+private fun localCoverUri(audioUri: Uri, albumId: Long): String {
+    return Uri.parse("fuo-cover://local")
+        .buildUpon()
+        .appendQueryParameter("audio", audioUri.toString())
+        .appendQueryParameter("albumArt", albumArtUri(albumId).orEmpty())
         .build()
         .toString()
 }

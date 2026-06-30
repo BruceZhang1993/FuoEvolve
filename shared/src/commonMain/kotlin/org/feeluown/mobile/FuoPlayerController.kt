@@ -20,6 +20,12 @@ enum class HomeSection {
     Local,
 }
 
+enum class LocalMusicViewMode {
+    All,
+    Artist,
+    Album,
+}
+
 class FuoPlayerController(
     private val providerRepository: ProviderMusicRepository,
     private val localRepository: LocalMusicRepository,
@@ -36,6 +42,8 @@ class FuoPlayerController(
     var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var homeSection by mutableStateOf(HomeSection.Recommend)
+        private set
+    var localMusicViewMode by mutableStateOf(LocalMusicViewMode.All)
         private set
     var isSearchOpen by mutableStateOf(false)
         private set
@@ -177,6 +185,10 @@ class FuoPlayerController(
         homeSection = value
     }
 
+    fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
+        localMusicViewMode = value
+    }
+
     fun search() {
         val keyword = query.trim()
         if (keyword.isEmpty()) {
@@ -218,6 +230,11 @@ class FuoPlayerController(
     fun playFromLocal(index: Int) {
         val track = localTracks.getOrNull(index) ?: return
         play(track, localTracks, index)
+    }
+
+    fun playLocalTrack(track: MusicTrack, sourceQueue: List<MusicTrack>) {
+        val index = sourceQueue.indexOfFirst { it.id == track.id }
+        if (index >= 0) play(track, sourceQueue, index)
     }
 
     fun playFromSearch(index: Int) {

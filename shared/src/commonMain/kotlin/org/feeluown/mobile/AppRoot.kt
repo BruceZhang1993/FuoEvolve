@@ -263,8 +263,54 @@ private fun ProviderContentHomeSection(
                     EmptyProviderContentHint(title)
                 }
             } else {
+                val dailySongSections = visibleSections.filter { it.feature.isDailySongs() }
                 val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
-                visibleSections.filterNot { it.feature.isPrivateFm() }.forEach { contentSection ->
+                val otherSections = visibleSections.filterNot {
+                    it.feature.isDailySongs() || it.feature.isPrivateFm()
+                }
+                if (dailySongSections.isNotEmpty()) {
+                    item(key = "header:daily-songs") {
+                        ProviderFeatureHeader(
+                            feature = dailySongSections.first().feature,
+                            providerLabel = dailySongSections
+                                .map { it.feature.providerName }
+                                .distinct()
+                                .joinToString(" / "),
+                        )
+                    }
+                    item(key = "daily-songs-grid") {
+                        ProviderFeatureCoverGrid(
+                            features = dailySongSections.map { it.feature },
+                            onClick = controller::openFeature,
+                        )
+                    }
+                }
+                if (privateFmSections.isNotEmpty()) {
+                    item(key = "header:private-fm") {
+                        ProviderFeatureHeader(
+                            feature = privateFmSections.first().feature,
+                            providerLabel = privateFmSections
+                                .map { it.feature.providerName }
+                                .distinct()
+                                .joinToString(" / "),
+                        )
+                    }
+                    val playablePrivateFmSections = privateFmSections.filter { it.tracks.isNotEmpty() }
+                    if (playablePrivateFmSections.isEmpty()) {
+                        item(key = "private-fm-empty") {
+                            ProviderContentMessage("私人 FM 暂无内容")
+                        }
+                    } else {
+                        item(key = "private-fm-grid") {
+                            PrivateFmGrid(
+                                sections = playablePrivateFmSections,
+                                enabled = !controller.isLoading,
+                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                            )
+                        }
+                    }
+                }
+                otherSections.forEach { contentSection ->
                     item(key = "header:${contentSection.feature.id}") {
                         ProviderFeatureHeader(
                             feature = contentSection.feature,
@@ -278,12 +324,6 @@ private fun ProviderContentHomeSection(
                     when {
                         contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
                             ProviderContentMessage(contentSection.errorMessage)
-                        }
-                        contentSection.feature.isDailySongs() -> item(key = "feature-entry:${contentSection.feature.id}") {
-                            ProviderFeatureCoverEntry(
-                                feature = contentSection.feature,
-                                onClick = { controller.openFeature(contentSection.feature) },
-                            )
                         }
                         contentSection.tracks.isNotEmpty() -> {
                             itemsIndexed(
@@ -313,31 +353,6 @@ private fun ProviderContentHomeSection(
                         }
                     }
                 }
-                if (privateFmSections.isNotEmpty()) {
-                    item(key = "header:private-fm") {
-                        ProviderFeatureHeader(
-                            feature = privateFmSections.first().feature,
-                            providerLabel = privateFmSections
-                                .map { it.feature.providerName }
-                                .distinct()
-                                .joinToString(" / "),
-                        )
-                    }
-                    val playablePrivateFmSections = privateFmSections.filter { it.tracks.isNotEmpty() }
-                    if (playablePrivateFmSections.isEmpty()) {
-                        item(key = "private-fm-empty") {
-                            ProviderContentMessage("私人 FM 暂无内容")
-                        }
-                    } else {
-                        item(key = "private-fm-grid") {
-                            PrivateFmGrid(
-                                sections = playablePrivateFmSections,
-                                enabled = !controller.isLoading,
-                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
-                            )
-                        }
-                    }
-                }
                 if (lockedProviderNames.isNotEmpty()) {
                     item(key = "locked-providers:${section.name}") {
                         ProviderLockedSummary(
@@ -352,21 +367,31 @@ private fun ProviderContentHomeSection(
 }
 
 @Composable
-private fun ProviderFeatureCoverEntry(
-    feature: ProviderFeature,
-    onClick: () -> Unit,
+private fun ProviderFeatureCoverGrid(
+    features: List<ProviderFeature>,
+    onClick: (ProviderFeature) -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ProviderFeatureCoverCard(
-            feature = feature,
-            onClick = onClick,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.weight(1f))
-        Spacer(Modifier.weight(1f))
+        features.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                row.forEach { feature ->
+                    ProviderFeatureCoverCard(
+                        feature = feature,
+                        onClick = { onClick(feature) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(3 - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 

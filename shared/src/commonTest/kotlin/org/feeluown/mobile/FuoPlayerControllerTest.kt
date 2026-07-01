@@ -118,6 +118,55 @@ class FuoPlayerControllerTest {
         }
     }
 
+    @Test
+    fun navigateBackClosesSearchBeforeLeavingApp() = runTest {
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openSearch()
+
+            assertEquals(true, controller.canNavigateBack)
+            assertEquals(true, controller.navigateBack())
+            assertEquals(false, controller.canNavigateBack)
+            assertEquals(false, controller.navigateBack())
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun navigateBackClosesQueueBeforeFullPlayer() = runTest {
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openFullPlayer()
+            controller.toggleQueue()
+
+            assertEquals(true, controller.navigateBack())
+            assertEquals(true, controller.canNavigateBack)
+            assertEquals(true, controller.navigateBack())
+            assertEquals(false, controller.canNavigateBack)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     private fun providerTrack(id: String, title: String): MusicTrack = MusicTrack(
         id = id,
         title = title,

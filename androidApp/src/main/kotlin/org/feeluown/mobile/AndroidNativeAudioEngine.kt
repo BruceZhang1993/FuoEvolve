@@ -121,6 +121,10 @@ class AndroidNativeAudioEngine(
             positionMs = controller.currentPosition.coerceAtLeast(0),
             durationMs = controller.duration.takeIf { it > 0 } ?: currentPayload?.durationMs ?: 0,
             bufferedMs = controller.bufferedPosition.coerceAtLeast(0),
+            lyrics = mutableState.value.lyrics ?: controller.currentMediaItem?.mediaMetadata
+                ?.extras
+                ?.getString("lyrics")
+                ?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -132,6 +136,10 @@ class AndroidNativeAudioEngine(
             positionMs = controller.currentPosition.coerceAtLeast(0),
             durationMs = controller.duration.takeIf { it > 0 } ?: currentPayload?.durationMs ?: 0,
             bufferedMs = controller.bufferedPosition.coerceAtLeast(0),
+            lyrics = mutableState.value.lyrics ?: controller.currentMediaItem?.mediaMetadata
+                ?.extras
+                ?.getString("lyrics")
+                ?.takeIf { it.isNotBlank() },
         )
     }
 

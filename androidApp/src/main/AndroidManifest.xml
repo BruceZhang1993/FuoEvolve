@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
-        android:name="com.chaquo.python.android.PyApplication"
+        android:name=".FuoEvolveApplication"
         android:allowBackup="true"
         android:label="FuoEvolve"
         android:networkSecurityConfig="@xml/network_security_config"

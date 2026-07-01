@@ -5,6 +5,7 @@ import android.app.Activity.RESULT_OK
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -15,11 +16,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val fuoApplication = application as FuoEvolveApplication
 
         setContent {
             var hasAudioPermission by remember { mutableStateOf(hasAudioPermission()) }
@@ -28,23 +29,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 hasAudioPermission = hasAudioPermission()
             }
-            val providerRepository = remember { AndroidFuoCoreBridge(applicationContext) }
-            val localRepository = remember { AndroidLocalMusicRepository(applicationContext) }
-            val downloadRepository = remember {
-                AndroidDownloadRepository(applicationContext, providerRepository)
-            }
-            val playbackEngine = remember {
-                AndroidNativeAudioEngine(applicationContext, lifecycleScope)
-            }
-            val controller = remember {
-                FuoPlayerController(
-                    providerRepository = providerRepository,
-                    localRepository = localRepository,
-                    downloadRepository = downloadRepository,
-                    playbackEngine = playbackEngine,
-                    scope = lifecycleScope,
-                )
-            }
+            val controller = fuoApplication.controller
             val webLoginLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartActivityForResult(),
             ) { result ->
@@ -59,6 +44,10 @@ class MainActivity : ComponentActivity() {
                         controller.loginProviderWithCookies(providerId, cookiesJson)
                     }
                 }
+            }
+
+            BackHandler(enabled = controller.canNavigateBack) {
+                controller.navigateBack()
             }
 
             LaunchedEffect(hasAudioPermission) {

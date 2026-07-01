@@ -83,6 +83,11 @@ class FuoPlayerController(
         private set
     var playbackState by mutableStateOf(PlaybackState())
         private set
+    val canNavigateBack: Boolean
+        get() = isFullPlayerOpen ||
+            isSettingsOpen ||
+            isSearchOpen ||
+            selectedPlaylist != null
 
     private var queue: List<MusicTrack> = emptyList()
     private var queueIndex: Int = -1
@@ -165,6 +170,32 @@ class FuoPlayerController(
 
     fun closeSearch() {
         isSearchOpen = false
+    }
+
+    fun navigateBack(): Boolean {
+        return when {
+            isFullPlayerOpen && isQueueOpen -> {
+                isQueueOpen = false
+                true
+            }
+            isFullPlayerOpen -> {
+                closeFullPlayer()
+                true
+            }
+            isSettingsOpen -> {
+                closeSettings()
+                true
+            }
+            isSearchOpen -> {
+                closeSearch()
+                true
+            }
+            selectedPlaylist != null -> {
+                closePlaylist()
+                true
+            }
+            else -> false
+        }
     }
 
     fun openSettings() {

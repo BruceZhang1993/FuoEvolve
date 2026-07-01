@@ -433,19 +433,12 @@ private fun ProviderContentHomeSection(
                                 .joinToString(" / "),
                         )
                     }
-                    val playablePrivateFmSections = privateFmSections.filter { it.tracks.isNotEmpty() }
-                    if (playablePrivateFmSections.isEmpty()) {
-                        item(key = "private-fm-empty") {
-                            ProviderContentMessage("私人 FM 暂无内容")
-                        }
-                    } else {
-                        item(key = "private-fm-grid") {
-                            PrivateFmGrid(
-                                sections = playablePrivateFmSections,
-                                enabled = !controller.isLoading,
-                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
-                            )
-                        }
+                    item(key = "private-fm-grid") {
+                        PrivateFmGrid(
+                            sections = privateFmSections,
+                            enabled = !controller.isLoading,
+                            onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                        )
                     }
                 }
                 otherSections.forEach { contentSection ->

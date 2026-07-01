@@ -254,6 +254,51 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun playAllFromDeferredPrivateFmLoadsFeatureBeforePlaying() = runTest {
+        val radioFeature = ProviderFeature(
+            id = "netease_radio",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "私人 FM",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val radioTracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(radioFeature),
+            featureSections = mapOf(radioFeature.id to ProviderContentSection(radioFeature, tracks = radioTracks)),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            assertEquals(emptyList(), controller.recommendSections.first { it.feature.id == radioFeature.id }.tracks)
+
+            controller.playAllFromFeature(radioFeature.id)
+            advanceUntilIdle()
+
+            assertEquals("provider:1", engine.lastTrack?.id)
+            assertEquals(radioTracks, controller.recommendSections.first { it.feature.id == radioFeature.id }.tracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesSearchBeforeLeavingApp() = runTest {
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {

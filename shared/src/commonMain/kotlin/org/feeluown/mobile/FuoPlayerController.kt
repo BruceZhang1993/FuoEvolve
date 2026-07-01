@@ -614,7 +614,12 @@ class FuoPlayerController(
 
     fun playAllFromFeature(featureId: String) {
         val section = (recommendSections + musicSections).firstOrNull { it.feature.id == featureId }
-        playFirst(section?.tracks.orEmpty(), section?.feature?.takeIf { it.isDynamicQueueFeature() })
+        val feature = section?.feature ?: return
+        if (section.tracks.isEmpty() && feature.isDynamicQueueFeature()) {
+            loadFeatureAndPlayAll(feature)
+        } else {
+            playFirst(section.tracks, feature.takeIf { it.isDynamicQueueFeature() })
+        }
     }
 
     fun playFromSelectedPlaylist(index: Int) {
@@ -801,6 +806,41 @@ class FuoPlayerController(
     private fun playFirst(sourceQueue: List<MusicTrack>, sourceFeature: ProviderFeature? = null) {
         val track = sourceQueue.firstOrNull() ?: return
         play(track, sourceQueue, 0, sourceFeature)
+    }
+
+    private fun loadFeatureAndPlayAll(feature: ProviderFeature) {
+        scope.launch {
+            isLoading = true
+            message = "正在加载：${feature.title}"
+            runCatching {
+                withTimeout(30_000) {
+                    providerRepository.loadFeature(feature)
+                }
+            }.onSuccess { section ->
+                updateHomeFeatureSection(section)
+                if (section.tracks.isEmpty()) {
+                    message = "${feature.title} 暂无歌曲"
+                } else {
+                    playFirst(section.tracks, feature)
+                }
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
+    }
+
+    private fun updateHomeFeatureSection(section: ProviderContentSection) {
+        recommendSections = recommendSections.replaceFeatureSection(section)
+        musicSections = musicSections.replaceFeatureSection(section)
+    }
+
+    private fun List<ProviderContentSection>.replaceFeatureSection(
+        section: ProviderContentSection,
+    ): List<ProviderContentSection> {
+        return map { existing ->
+            if (existing.feature.id == section.feature.id) section else existing
+        }
     }
 
     private fun prefetchFeatureQueueIfNeeded() {

@@ -333,7 +333,7 @@ class FuoPlayerController(
         }
         scope.launch {
             isLoading = true
-            val title = if (section == HomeSection.Recommend) "推荐" else "音乐"
+            val title = if (section == HomeSection.Recommend) "推荐" else "探索"
             message = "正在加载$title"
             runCatching {
                 refreshProviderCatalog()

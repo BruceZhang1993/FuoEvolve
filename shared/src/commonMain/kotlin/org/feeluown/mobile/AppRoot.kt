@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -169,7 +170,7 @@ fun AppRoot(
 private fun HomeSectionTabs(controller: FuoPlayerController) {
     val sections = listOf(
         HomeSection.Recommend to "推荐",
-        HomeSection.Music to "音乐",
+        HomeSection.Music to "探索",
         HomeSection.Local to "本地音乐",
     )
     val selectedIndex = sections.indexOfFirst { it.first == controller.homeSection }.coerceAtLeast(0)
@@ -221,7 +222,7 @@ private fun ProviderContentHomeSection(
     section: HomeSection,
     modifier: Modifier,
 ) {
-    val title = if (section == HomeSection.Recommend) "推荐" else "音乐"
+    val title = if (section == HomeSection.Recommend) "推荐" else "探索"
     val sections = controller.contentSectionsFor(section)
     val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
     val lockedProviderNames = remember(sections) {
@@ -259,10 +260,11 @@ private fun ProviderContentHomeSection(
                 }
             } else {
                 visibleSections.forEach { contentSection ->
+                    val isPrivateFm = contentSection.feature.isPrivateFm()
                     item(key = "header:${contentSection.feature.id}") {
                         ProviderFeatureHeader(
                             feature = contentSection.feature,
-                            onPlayAll = if (contentSection.tracks.isNotEmpty()) {
+                            onPlayAll = if (contentSection.tracks.isNotEmpty() && !isPrivateFm) {
                                 { controller.playAllFromFeature(contentSection.feature.id) }
                             } else {
                                 null
@@ -272,6 +274,12 @@ private fun ProviderContentHomeSection(
                     when {
                         contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
                             ProviderContentMessage(contentSection.errorMessage)
+                        }
+                        isPrivateFm -> item(key = "radio:${contentSection.feature.id}") {
+                            PrivateFmEntry(
+                                enabled = contentSection.tracks.isNotEmpty() && !controller.isLoading,
+                                onClick = { controller.playAllFromFeature(contentSection.feature.id) },
+                            )
                         }
                         contentSection.tracks.isNotEmpty() -> {
                             itemsIndexed(
@@ -289,15 +297,11 @@ private fun ProviderContentHomeSection(
                             }
                         }
                         contentSection.playlists.isNotEmpty() -> {
-                            itemsIndexed(
-                                contentSection.playlists,
-                                key = { _, item -> "${contentSection.feature.id}:${item.id}" },
-                            ) { _, playlist ->
-                                ProviderPlaylistRow(
-                                    playlist = playlist,
-                                    onClick = { controller.openPlaylist(playlist) },
+                            item(key = "playlists:${contentSection.feature.id}") {
+                                ProviderPlaylistFlow(
+                                    playlists = contentSection.playlists,
+                                    onClick = controller::openPlaylist,
                                 )
-                                HorizontalDivider()
                             }
                         }
                         else -> item(key = "empty:${contentSection.feature.id}") {
@@ -315,6 +319,79 @@ private fun ProviderContentHomeSection(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PrivateFmEntry(enabled: Boolean, onClick: () -> Unit) {
+    IconButton(
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .size(56.dp),
+        enabled = enabled,
+        onClick = onClick,
+    ) {
+        Icon(
+            Icons.Filled.PlayArrow,
+            contentDescription = "播放私人 FM",
+            modifier = Modifier.size(36.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProviderPlaylistFlow(
+    playlists: List<ProviderPlaylist>,
+    onClick: (ProviderPlaylist) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        playlists.forEach { playlist ->
+            ProviderPlaylistCard(
+                playlist = playlist,
+                onClick = { onClick(playlist) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderPlaylistCard(
+    playlist: ProviderPlaylist,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        CoverBox(
+            track = playlist.toDisplayTrack(),
+            modifier = Modifier.size(132.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = playlist.title.ifBlank { "未命名歌单" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = listOf(
+                playlist.providerName,
+                playlist.playCount?.let { formatPlayCount(it) },
+            ).filterNotNull().joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -363,60 +440,21 @@ private fun PlayAllButton(onClick: () -> Unit, enabled: Boolean = true) {
     }
 }
 
-@Composable
-private fun ProviderPlaylistRow(
-    playlist: ProviderPlaylist,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CoverBox(
-            track = MusicTrack(
-                id = playlist.id,
-                title = playlist.title,
-                artists = playlist.providerName,
-                album = "",
-                source = playlist.providerId,
-                sourceType = TrackSourceType.Provider,
-                coverUrl = playlist.coverUrl,
-                providerName = playlist.providerName,
-            ),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = playlist.title.ifBlank { "未命名歌单" },
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = listOf(
-                    playlist.providerName,
-                    playlist.playCount?.let { formatPlayCount(it) },
-                ).filterNotNull().joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (playlist.description.isNotBlank()) {
-                Text(
-                    text = playlist.description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+private fun ProviderFeature.isPrivateFm(): Boolean {
+    return id.endsWith("_radio")
+}
+
+private fun ProviderPlaylist.toDisplayTrack(): MusicTrack {
+    return MusicTrack(
+        id = id,
+        title = title,
+        artists = providerName,
+        album = "",
+        source = providerId,
+        sourceType = TrackSourceType.Provider,
+        coverUrl = coverUrl,
+        providerName = providerName,
+    )
 }
 
 @Composable

@@ -25,12 +25,17 @@ class FuoEvolveApplication : PyApplication() {
         AndroidNativeAudioEngine(applicationContext, appScope)
     }
 
+    private val settingsStore: AndroidAppSettingsStore by lazy {
+        AndroidAppSettingsStore(applicationContext)
+    }
+
     val controller: FuoPlayerController by lazy {
         FuoPlayerController(
             providerRepository = providerRepository,
             localRepository = localRepository,
             downloadRepository = downloadRepository,
             playbackEngine = playbackEngine,
+            settingsStore = settingsStore,
             scope = appScope,
         )
     }

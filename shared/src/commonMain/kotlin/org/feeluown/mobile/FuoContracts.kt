@@ -8,6 +8,21 @@ enum class TrackSourceType {
     Downloaded,
 }
 
+enum class ProviderLoginMode {
+    WebView,
+    Cookie,
+}
+
+data class AppSettings(
+    val homeSection: HomeSection = HomeSection.Recommend,
+    val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
+    val searchScope: SearchScope = SearchScope.All,
+    val selectedSearchProviderId: String? = null,
+    val selectedSettingsProviderId: String? = null,
+    val providerLoginMode: ProviderLoginMode = ProviderLoginMode.WebView,
+    val providerCookieInputs: Map<String, String> = emptyMap(),
+)
+
 data class MusicTrack(
     val id: String,
     val title: String,
@@ -156,4 +171,15 @@ interface PlaybackEngine {
     fun resume()
     fun stop()
     fun seekTo(positionMs: Long)
+}
+
+interface AppSettingsStore {
+    suspend fun load(): AppSettings
+    suspend fun save(settings: AppSettings)
+}
+
+object NoOpAppSettingsStore : AppSettingsStore {
+    override suspend fun load(): AppSettings = AppSettings()
+
+    override suspend fun save(settings: AppSettings) = Unit
 }

@@ -33,6 +33,7 @@ class FuoPlayerController(
     private val localRepository: LocalMusicRepository,
     private val downloadRepository: DownloadRepository,
     private val playbackEngine: PlaybackEngine,
+    private val settingsStore: AppSettingsStore = NoOpAppSettingsStore,
     private val scope: CoroutineScope,
 ) {
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
@@ -60,6 +61,10 @@ class FuoPlayerController(
     var searchScope by mutableStateOf(SearchScope.All)
         private set
     var selectedSearchProviderId by mutableStateOf<String?>(null)
+        private set
+    var selectedSettingsProviderId by mutableStateOf<String?>(null)
+        private set
+    var providerLoginMode by mutableStateOf(ProviderLoginMode.WebView)
         private set
     var searchResults by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
@@ -95,6 +100,8 @@ class FuoPlayerController(
 
     init {
         scope.launch {
+            runCatching { settingsStore.load() }
+                .onSuccess { applySettings(it) }
             runCatching {
                 providerRepository.initialize()
                 refreshProviderCatalog()
@@ -102,7 +109,7 @@ class FuoPlayerController(
             }.onSuccess {
                 message = "音乐服务已就绪"
                 refreshAllProviderAuthStates()
-                refreshHomeContent(HomeSection.Recommend)
+                refreshHomeContent(homeSection)
             }.onFailure {
                 setError(it)
             }
@@ -141,6 +148,10 @@ class FuoPlayerController(
     }
 
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
+
+    fun selectedSettingsProvider(): ProviderInfo? {
+        return providers.firstOrNull { it.providerId == selectedSettingsProviderId } ?: providers.firstOrNull()
+    }
 
     fun contentSectionsFor(section: HomeSection): List<ProviderContentSection> {
         return when (section) {
@@ -209,6 +220,17 @@ class FuoPlayerController(
 
     fun onProviderCookiesChange(providerId: String, value: String) {
         providerCookieInputs = providerCookieInputs + (providerId to value)
+        persistSettings()
+    }
+
+    fun onSettingsProviderChange(providerId: String) {
+        selectedSettingsProviderId = providerId
+        persistSettings()
+    }
+
+    fun onProviderLoginModeChange(value: ProviderLoginMode) {
+        providerLoginMode = value
+        persistSettings()
     }
 
     fun loginProviderWithCookies(providerId: String, cookiesJson: String) {
@@ -225,6 +247,7 @@ class FuoPlayerController(
                 .onSuccess {
                     providerAuthStates = providerAuthStates + (providerId to it)
                     providerCookieInputs = providerCookieInputs - providerId
+                    persistSettings()
                     message = if (it.isLoggedIn) {
                         "${it.providerName} 已登录：${it.userName.orEmpty()}"
                     } else {
@@ -248,17 +271,20 @@ class FuoPlayerController(
         if (value != SearchScope.Provider) {
             selectedSearchProviderId = null
         }
+        persistSettings()
         if (query.isNotBlank()) search()
     }
 
     fun onSearchProviderChange(providerId: String) {
         searchScope = SearchScope.Provider
         selectedSearchProviderId = providerId
+        persistSettings()
         if (query.isNotBlank()) search()
     }
 
     fun onHomeSectionChange(value: HomeSection) {
         homeSection = value
+        persistSettings()
         if (value != HomeSection.Local && contentSectionsFor(value).isEmpty()) {
             refreshHomeContent(value)
         }
@@ -266,6 +292,7 @@ class FuoPlayerController(
 
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
         localMusicViewMode = value
+        persistSettings()
     }
 
     fun search() {
@@ -494,6 +521,16 @@ class FuoPlayerController(
     private suspend fun refreshProviderCatalog() {
         val loadedProviders = providerRepository.providers()
         providers = loadedProviders
+        val providerIds = loadedProviders.map { it.providerId }.toSet()
+        if (selectedSettingsProviderId !in providerIds) {
+            selectedSettingsProviderId = loadedProviders.firstOrNull()?.providerId
+        }
+        if (selectedSearchProviderId !in providerIds) {
+            selectedSearchProviderId = null
+            if (searchScope == SearchScope.Provider) {
+                searchScope = SearchScope.All
+            }
+        }
         providerAuthStates = loadedProviders.associate { provider ->
             provider.providerId to (providerAuthStates[provider.providerId] ?: ProviderAuthState(
                 providerId = provider.providerId,
@@ -578,6 +615,31 @@ class FuoPlayerController(
 
     private fun providerName(providerId: String): String {
         return providers.firstOrNull { it.providerId == providerId }?.providerName ?: providerId
+    }
+
+    private fun applySettings(settings: AppSettings) {
+        homeSection = settings.homeSection
+        localMusicViewMode = settings.localMusicViewMode
+        searchScope = settings.searchScope
+        selectedSearchProviderId = settings.selectedSearchProviderId
+        selectedSettingsProviderId = settings.selectedSettingsProviderId
+        providerLoginMode = settings.providerLoginMode
+        providerCookieInputs = settings.providerCookieInputs
+    }
+
+    private fun persistSettings() {
+        val settings = AppSettings(
+            homeSection = homeSection,
+            localMusicViewMode = localMusicViewMode,
+            searchScope = searchScope,
+            selectedSearchProviderId = selectedSearchProviderId,
+            selectedSettingsProviderId = selectedSettingsProviderId,
+            providerLoginMode = providerLoginMode,
+            providerCookieInputs = providerCookieInputs,
+        )
+        scope.launch {
+            settingsStore.save(settings)
+        }
     }
 
     private fun setError(throwable: Throwable) {

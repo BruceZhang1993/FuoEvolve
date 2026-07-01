@@ -167,6 +167,45 @@ class FuoPlayerControllerTest {
         }
     }
 
+    @Test
+    fun restoresAndPersistsSettings() = runTest {
+        val store = FakeSettingsStore(
+            AppSettings(
+                homeSection = HomeSection.Local,
+                localMusicViewMode = LocalMusicViewMode.Album,
+                providerLoginMode = ProviderLoginMode.Cookie,
+                providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = FakeProviderRepository(emptyList()),
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = store,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(HomeSection.Local, controller.homeSection)
+            assertEquals(LocalMusicViewMode.Album, controller.localMusicViewMode)
+            assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
+            assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
+
+            controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
+            controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            advanceUntilIdle()
+
+            assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
+            assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
     private fun providerTrack(id: String, title: String): MusicTrack = MusicTrack(
         id = id,
         title = title,
@@ -275,6 +314,17 @@ class FuoPlayerControllerTest {
 
         override fun seekTo(positionMs: Long) {
             mutableState.value = mutableState.value.copy(positionMs = positionMs)
+        }
+    }
+
+    private class FakeSettingsStore(initial: AppSettings = AppSettings()) : AppSettingsStore {
+        var saved = initial
+            private set
+
+        override suspend fun load(): AppSettings = saved
+
+        override suspend fun save(settings: AppSettings) {
+            saved = settings
         }
     }
 }

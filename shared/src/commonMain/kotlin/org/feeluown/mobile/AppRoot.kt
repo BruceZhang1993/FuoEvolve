@@ -642,8 +642,22 @@ private fun SettingsScreen(
             if (controller.providers.isEmpty()) {
                 ProviderContentMessage("Provider 正在初始化")
             } else {
-                controller.providers.forEach { provider ->
-                    ProviderLoginCard(
+                if (controller.providers.size > 1) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        controller.providers.forEach { provider ->
+                            FilterChip(
+                                selected = controller.selectedSettingsProviderId == provider.providerId,
+                                onClick = { controller.onSettingsProviderChange(provider.providerId) },
+                                label = { Text(provider.providerName) },
+                            )
+                        }
+                    }
+                }
+                controller.selectedSettingsProvider()?.let { provider ->
+                    ProviderLoginPanel(
                         controller = controller,
                         provider = provider,
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
@@ -654,8 +668,9 @@ private fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProviderLoginCard(
+private fun ProviderLoginPanel(
     controller: FuoPlayerController,
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
@@ -684,41 +699,58 @@ private fun ProviderLoginCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = "可使用浏览器登录自动获取 Cookie，也可粘贴 Cookie header 或 JSON 对象。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                enabled = !controller.isLoading && provider.loginConfig != null,
-                onClick = { onOpenProviderWebLogin(provider) },
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("浏览器登录")
+            SingleChoiceSegmentedButtonRow {
+                SegmentedButton(
+                    selected = controller.providerLoginMode == ProviderLoginMode.WebView,
+                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.WebView) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                ) {
+                    Text("WebView")
+                }
+                SegmentedButton(
+                    selected = controller.providerLoginMode == ProviderLoginMode.Cookie,
+                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.Cookie) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                ) {
+                    Text("复制 Cookie")
+                }
             }
-            TextField(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp),
-                value = controller.cookieInputFor(provider.providerId),
-                onValueChange = { controller.onProviderCookiesChange(provider.providerId, it) },
-                placeholder = { Text("""{"MUSIC_U":"...","__csrf":"..."}""") },
-                minLines = 4,
-                maxLines = 8,
-            )
-            Button(
-                enabled = !controller.isLoading,
-                onClick = {
-                    controller.loginProviderWithCookies(
-                        provider.providerId,
-                        controller.cookieInputFor(provider.providerId),
+            when (controller.providerLoginMode) {
+                ProviderLoginMode.WebView -> {
+                    Button(
+                        enabled = !controller.isLoading && provider.loginConfig != null,
+                        onClick = { onOpenProviderWebLogin(provider) },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (controller.isLoading) "登录中" else "WebView 登录")
+                    }
+                }
+                ProviderLoginMode.Cookie -> {
+                    TextField(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp),
+                        value = controller.cookieInputFor(provider.providerId),
+                        onValueChange = { controller.onProviderCookiesChange(provider.providerId, it) },
+                        placeholder = { Text("""{"MUSIC_U":"...","__csrf":"..."}""") },
+                        minLines = 4,
+                        maxLines = 8,
                     )
-                },
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text(if (controller.isLoading) "登录中" else "Cookie 登录")
+                    Button(
+                        enabled = !controller.isLoading,
+                        onClick = {
+                            controller.loginProviderWithCookies(
+                                provider.providerId,
+                                controller.cookieInputFor(provider.providerId),
+                            )
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (controller.isLoading) "登录中" else "登录")
+                    }
+                }
             }
         }
     }

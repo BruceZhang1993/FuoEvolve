@@ -75,6 +75,7 @@ fun AppRoot(
     hasAudioPermission: Boolean,
     onRequestAudioPermission: () -> Unit,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     MaterialTheme {
         if (controller.isFullPlayerOpen) {
@@ -82,7 +83,7 @@ fun AppRoot(
             return@MaterialTheme
         }
         if (controller.isSettingsOpen) {
-            SettingsScreen(controller, onOpenProviderWebLogin)
+            SettingsScreen(controller, onOpenProviderWebLogin, onLogoutProvider)
             return@MaterialTheme
         }
         if (controller.isSearchOpen) {
@@ -847,6 +848,7 @@ private fun EmptyLocalMusicHint() {
 private fun SettingsScreen(
     controller: FuoPlayerController,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -895,9 +897,11 @@ private fun SettingsScreen(
                         controller = controller,
                         provider = provider,
                         onOpenProviderWebLogin = onOpenProviderWebLogin,
+                        onLogoutProvider = onLogoutProvider,
                     )
                 }
             }
+            AudioQualitySettingsPanel(controller)
             CacheSettingsPanel(controller)
         }
     }
@@ -909,6 +913,7 @@ private fun ProviderLoginPanel(
     controller: FuoPlayerController,
     provider: ProviderInfo,
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
+    onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     val authState = controller.authStateFor(provider)
     Surface(
@@ -934,6 +939,15 @@ private fun ProviderLoginPanel(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (authState.isLoggedIn) {
+                Button(
+                    enabled = !controller.isLoading,
+                    onClick = { onLogoutProvider(provider) },
+                ) {
+                    Text(if (controller.isLoading) "退出中" else "退出登录")
+                }
+                return@Column
+            }
             SingleChoiceSegmentedButtonRow {
                 SegmentedButton(
                     selected = controller.providerLoginMode == ProviderLoginMode.WebView,
@@ -985,6 +999,63 @@ private fun ProviderLoginPanel(
                         Spacer(Modifier.size(8.dp))
                         Text(if (controller.isLoading) "登录中" else "登录")
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioQualitySettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "音质",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            AudioQualityRow(
+                title = "WiFi",
+                selected = controller.wifiAudioQualityPolicy,
+                onSelect = controller::onWifiAudioQualityPolicyChange,
+            )
+            AudioQualityRow(
+                title = "蜂窝网络",
+                selected = controller.cellularAudioQualityPolicy,
+                onSelect = controller::onCellularAudioQualityPolicyChange,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioQualityRow(
+    title: String,
+    selected: AudioQualityPolicy,
+    onSelect: (AudioQualityPolicy) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            AudioQualityPolicy.entries.forEachIndexed { index, policy ->
+                SegmentedButton(
+                    selected = selected == policy,
+                    onClick = { onSelect(policy) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = AudioQualityPolicy.entries.size),
+                ) {
+                    Text(policy.label)
                 }
             }
         }

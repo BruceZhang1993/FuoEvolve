@@ -19,6 +19,11 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             providerCookieInputs = readCookieInputs(),
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
+            wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
+            cellularAudioQualityPolicy = enumValue(
+                KEY_CELLULAR_AUDIO_QUALITY_POLICY,
+                DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
+            ),
         )
     }
 
@@ -34,6 +39,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_PROVIDER_COOKIE_INPUTS, cookieInputsJson(settings.providerCookieInputs))
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
+                .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
+                .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
                 .apply()
         }
     }
@@ -85,5 +92,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_PROVIDER_COOKIE_INPUTS = "provider_cookie_inputs"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
+        private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
+        private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
     }
 }

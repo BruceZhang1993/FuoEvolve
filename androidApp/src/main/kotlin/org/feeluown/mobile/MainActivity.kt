@@ -67,6 +67,10 @@ class MainActivity : ComponentActivity() {
                         webLoginLauncher.launch(ProviderWebLoginActivity.createIntent(this@MainActivity, provider))
                     }
                 },
+                onLogoutProvider = { provider ->
+                    ProviderWebLoginActivity.clearWebLoginState()
+                    controller.logoutProvider(provider.providerId)
+                },
             )
         }
     }

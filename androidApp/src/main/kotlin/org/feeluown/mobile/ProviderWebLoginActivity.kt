@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -228,6 +229,14 @@ class ProviderWebLoginActivity : Activity() {
                 .putExtra(EXTRA_PROVIDER_NAME, provider.providerName)
                 .putExtra(EXTRA_LOGIN_URL, loginConfig.loginUrl)
                 .putExtra(EXTRA_COOKIE_KEY_GROUPS, keyGroups.toString())
+        }
+
+        fun clearWebLoginState() {
+            CookieManager.getInstance().apply {
+                removeAllCookies(null)
+                flush()
+            }
+            WebStorage.getInstance().deleteAllData()
         }
     }
 }

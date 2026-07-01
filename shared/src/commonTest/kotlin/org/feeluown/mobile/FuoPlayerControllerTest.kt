@@ -119,6 +119,60 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun dailyRecommendSongsLoadOnlyAfterOpeningFeature() = runTest {
+        val dailyFeature = ProviderFeature(
+            id = "netease_daily_songs",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "每日推荐歌曲",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val playlistFeature = ProviderFeature(
+            id = "netease_daily_playlists",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "推荐歌单",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = true,
+        )
+        val dailyTracks = listOf(providerTrack("provider:1", "First"))
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(dailyFeature, playlistFeature),
+            featureSections = mapOf(
+                dailyFeature.id to ProviderContentSection(dailyFeature, tracks = dailyTracks),
+                playlistFeature.id to ProviderContentSection(playlistFeature),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(listOf(playlistFeature.id), provider.loadedFeatureIds)
+            assertEquals(emptyList(), controller.recommendSections.first { it.feature.id == dailyFeature.id }.tracks)
+
+            controller.openFeature(dailyFeature)
+            advanceUntilIdle()
+
+            assertEquals(listOf(playlistFeature.id, dailyFeature.id), provider.loadedFeatureIds)
+            assertEquals(dailyTracks, controller.selectedFeatureTracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun navigateBackClosesSearchBeforeLeavingApp() = runTest {
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
@@ -220,8 +274,11 @@ class FuoPlayerControllerTest {
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
+        private val features: List<ProviderFeature> = emptyList(),
+        private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
     ) : ProviderMusicRepository {
         var resolveCount = 0
+        val loadedFeatureIds = mutableListOf<String>()
 
         override suspend fun initialize() = Unit
 
@@ -256,10 +313,12 @@ class FuoPlayerControllerTest {
                 userName = "tester",
             )
 
-        override suspend fun features(): List<ProviderFeature> = emptyList()
+        override suspend fun features(): List<ProviderFeature> = features
 
-        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection =
-            ProviderContentSection(feature)
+        override suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection {
+            loadedFeatureIds += feature.id
+            return featureSections[feature.id] ?: ProviderContentSection(feature)
+        }
 
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
     }

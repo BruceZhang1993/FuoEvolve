@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -87,6 +87,10 @@ fun AppRoot(
         }
         if (controller.isSearchOpen) {
             SearchScreen(controller)
+            return@MaterialTheme
+        }
+        if (controller.selectedFeature != null) {
+            ProviderFeatureScreen(controller)
             return@MaterialTheme
         }
         if (controller.selectedPlaylist != null) {
@@ -259,12 +263,12 @@ private fun ProviderContentHomeSection(
                     EmptyProviderContentHint(title)
                 }
             } else {
-                visibleSections.forEach { contentSection ->
-                    val isPrivateFm = contentSection.feature.isPrivateFm()
+                val privateFmSections = visibleSections.filter { it.feature.isPrivateFm() }
+                visibleSections.filterNot { it.feature.isPrivateFm() }.forEach { contentSection ->
                     item(key = "header:${contentSection.feature.id}") {
                         ProviderFeatureHeader(
                             feature = contentSection.feature,
-                            onPlayAll = if (contentSection.tracks.isNotEmpty() && !isPrivateFm) {
+                            onPlayAll = if (contentSection.tracks.isNotEmpty()) {
                                 { controller.playAllFromFeature(contentSection.feature.id) }
                             } else {
                                 null
@@ -275,10 +279,10 @@ private fun ProviderContentHomeSection(
                         contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
                             ProviderContentMessage(contentSection.errorMessage)
                         }
-                        isPrivateFm -> item(key = "radio:${contentSection.feature.id}") {
-                            PrivateFmEntry(
-                                enabled = contentSection.tracks.isNotEmpty() && !controller.isLoading,
-                                onClick = { controller.playAllFromFeature(contentSection.feature.id) },
+                        contentSection.feature.isDailySongs() -> item(key = "feature-entry:${contentSection.feature.id}") {
+                            ProviderFeatureCoverEntry(
+                                feature = contentSection.feature,
+                                onClick = { controller.openFeature(contentSection.feature) },
                             )
                         }
                         contentSection.tracks.isNotEmpty() -> {
@@ -298,7 +302,7 @@ private fun ProviderContentHomeSection(
                         }
                         contentSection.playlists.isNotEmpty() -> {
                             item(key = "playlists:${contentSection.feature.id}") {
-                                ProviderPlaylistFlow(
+                                ProviderPlaylistGrid(
                                     playlists = contentSection.playlists,
                                     onClick = controller::openPlaylist,
                                 )
@@ -306,6 +310,31 @@ private fun ProviderContentHomeSection(
                         }
                         else -> item(key = "empty:${contentSection.feature.id}") {
                             ProviderContentMessage("暂无内容")
+                        }
+                    }
+                }
+                if (privateFmSections.isNotEmpty()) {
+                    item(key = "header:private-fm") {
+                        ProviderFeatureHeader(
+                            feature = privateFmSections.first().feature,
+                            providerLabel = privateFmSections
+                                .map { it.feature.providerName }
+                                .distinct()
+                                .joinToString(" / "),
+                        )
+                    }
+                    val playablePrivateFmSections = privateFmSections.filter { it.tracks.isNotEmpty() }
+                    if (playablePrivateFmSections.isEmpty()) {
+                        item(key = "private-fm-empty") {
+                            ProviderContentMessage("私人 FM 暂无内容")
+                        }
+                    } else {
+                        item(key = "private-fm-grid") {
+                            PrivateFmGrid(
+                                sections = playablePrivateFmSections,
+                                enabled = !controller.isLoading,
+                                onClick = { section -> controller.playAllFromFeature(section.feature.id) },
+                            )
                         }
                     }
                 }
@@ -323,39 +352,159 @@ private fun ProviderContentHomeSection(
 }
 
 @Composable
-private fun PrivateFmEntry(enabled: Boolean, onClick: () -> Unit) {
-    IconButton(
-        modifier = Modifier
-            .padding(vertical = 4.dp)
-            .size(56.dp),
-        enabled = enabled,
-        onClick = onClick,
+private fun ProviderFeatureCoverEntry(
+    feature: ProviderFeature,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(
-            Icons.Filled.PlayArrow,
-            contentDescription = "播放私人 FM",
-            modifier = Modifier.size(36.dp),
+        ProviderFeatureCoverCard(
+            feature = feature,
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ProviderFeatureCoverCard(
+    feature: ProviderFeature,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        CoverBox(
+            track = feature.toDisplayTrack(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = feature.title.ifBlank { "推荐" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = feature.providerName,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 @Composable
-private fun ProviderPlaylistFlow(
+private fun PrivateFmGrid(
+    sections: List<ProviderContentSection>,
+    enabled: Boolean,
+    onClick: (ProviderContentSection) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        sections.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                row.forEach { section ->
+                    PrivateFmButton(
+                        section = section,
+                        enabled = enabled,
+                        onClick = { onClick(section) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(3 - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrivateFmButton(
+    section: ProviderContentSection,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 6.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = "播放${section.feature.providerName}私人 FM",
+                modifier = Modifier.size(32.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = section.feature.providerName,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "私人 FM",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderPlaylistGrid(
     playlists: List<ProviderPlaylist>,
     onClick: (ProviderPlaylist) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        playlists.forEach { playlist ->
-            ProviderPlaylistCard(
-                playlist = playlist,
-                onClick = { onClick(playlist) },
-            )
+        playlists.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                row.forEach { playlist ->
+                    ProviderPlaylistCard(
+                        playlist = playlist,
+                        onClick = { onClick(playlist) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(3 - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
         }
     }
 }
@@ -364,16 +513,18 @@ private fun ProviderPlaylistFlow(
 private fun ProviderPlaylistCard(
     playlist: ProviderPlaylist,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier
-            .width(132.dp)
+        modifier = modifier
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp),
     ) {
         CoverBox(
             track = playlist.toDisplayTrack(),
-            modifier = Modifier.size(132.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -396,7 +547,11 @@ private fun ProviderPlaylistCard(
 }
 
 @Composable
-private fun ProviderFeatureHeader(feature: ProviderFeature, onPlayAll: (() -> Unit)? = null) {
+private fun ProviderFeatureHeader(
+    feature: ProviderFeature,
+    providerLabel: String = feature.providerName,
+    onPlayAll: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -414,7 +569,7 @@ private fun ProviderFeatureHeader(feature: ProviderFeature, onPlayAll: (() -> Un
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = feature.providerName,
+                text = providerLabel,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -442,6 +597,22 @@ private fun PlayAllButton(onClick: () -> Unit, enabled: Boolean = true) {
 
 private fun ProviderFeature.isPrivateFm(): Boolean {
     return id.endsWith("_radio")
+}
+
+private fun ProviderFeature.isDailySongs(): Boolean {
+    return id.endsWith("_daily_songs")
+}
+
+private fun ProviderFeature.toDisplayTrack(): MusicTrack {
+    return MusicTrack(
+        id = id,
+        title = title,
+        artists = providerName,
+        album = "",
+        source = providerId,
+        sourceType = TrackSourceType.Provider,
+        providerName = providerName,
+    )
 }
 
 private fun ProviderPlaylist.toDisplayTrack(): MusicTrack {
@@ -813,6 +984,98 @@ private fun PermissionPanel(onRequestAudioPermission: () -> Unit) {
             )
             Button(onClick = onRequestAudioPermission) {
                 Text("授权")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderFeatureScreen(controller: FuoPlayerController) {
+    val feature = controller.selectedFeature ?: return
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = feature.title.ifBlank { "推荐" },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeFeature) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (controller.isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = listOf(feature.providerName, "${controller.selectedFeatureTracks.size} 首")
+                        .joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (controller.selectedFeatureTracks.isNotEmpty()) {
+                    PlayAllButton(onClick = controller::playAllFromSelectedFeature)
+                }
+            }
+            if (controller.selectedFeatureError != null) {
+                ProviderContentMessage(controller.selectedFeatureError.orEmpty())
+            } else if (controller.isLoading && controller.selectedFeatureTracks.isEmpty()) {
+                Text(
+                    text = controller.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (controller.selectedFeatureTracks.isEmpty() && !controller.isLoading && controller.selectedFeatureError == null) {
+                    item {
+                        ProviderContentMessage("暂无歌曲")
+                    }
+                } else {
+                    itemsIndexed(controller.selectedFeatureTracks, key = { _, item -> item.id }) { index, track ->
+                        TrackRow(
+                            track = track,
+                            downloadState = controller.downloadStates[track.id],
+                            onClick = { controller.playFromSelectedFeature(index) },
+                            onDownload = { controller.download(track) },
+                            onDeleteDownload = { controller.deleteDownload(track) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
             }
         }
     }

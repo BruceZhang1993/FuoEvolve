@@ -295,6 +295,7 @@ class FuoMobileBridge:
         self.provider_registry.load()
         self._tracks: Dict[str, Any] = {}
         self._playlists: Dict[str, Any] = {}
+        self._restore_saved_logins()
 
     def providers(self) -> str:
         providers = [self._get_provider(provider_id) for provider_id in self.provider_registry.provider_ids]
@@ -483,6 +484,32 @@ class FuoMobileBridge:
             from fuo_qqmusic.login import write_cookies
 
             write_cookies(user, cookies)
+
+    def _restore_saved_logins(self) -> None:
+        for provider_id in self.provider_registry.provider_ids:
+            try:
+                self._restore_saved_login(provider_id)
+            except Exception as exc:  # pylint: disable=broad-except
+                bridge_log(f"restore login failed provider_id={provider_id}: {exc}")
+
+    def _restore_saved_login(self, provider_id: str) -> None:
+        provider = self._get_provider(provider_id)
+        user = None
+        if provider_id == "netease":
+            from fuo_netease.login_controller import LoginController
+
+            user = LoginController.load()
+        elif provider_id == "qqmusic":
+            from fuo_qqmusic.login import read_cookies
+
+            cookies = read_cookies()
+            if hasattr(provider, "try_get_user_from_cookies"):
+                user, err = provider.try_get_user_from_cookies(cookies)
+                if user is None:
+                    bridge_log(f"restore login skipped provider_id={provider_id}: {err}")
+        if user is not None:
+            provider.auth(user)
+            bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
     def _prepare_payload(self, song) -> Dict[str, Any]:
         try:

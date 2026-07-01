@@ -36,7 +36,7 @@ class ProviderWebLoginActivity : Activity() {
             return
         }
 
-        CookieManager.getInstance().setAcceptCookie(true)
+        cookieManager().setAcceptCookie(true)
 
         statusView = TextView(this).apply {
             text = "完成登录后会自动获取 Cookie"
@@ -46,14 +46,16 @@ class ProviderWebLoginActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
             settings.userAgentString = DESKTOP_USER_AGENT
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            cookieManager().setAcceptThirdPartyCookies(this, true)
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
+                    cookieManager().flush()
                     finishWithCookies(url, auto = true)
                 }
             }
@@ -94,6 +96,7 @@ class ProviderWebLoginActivity : Activity() {
     }
 
     override fun onDestroy() {
+        cookieManager().flush()
         if (::webView.isInitialized) {
             webView.destroy()
         }
@@ -101,13 +104,17 @@ class ProviderWebLoginActivity : Activity() {
     }
 
     private fun finishWithCookies(currentUrl: String?, auto: Boolean) {
+        if (!auto && ::webView.isInitialized) {
+            webView.stopLoading()
+        }
+        cookieManager().flush()
         val cookies = collectCookies(currentUrl)
         if (auto && !hasRequiredCookies(cookies)) return
         if (!auto && cookies.isEmpty()) {
             Toast.makeText(this, "未获取到 Cookie", Toast.LENGTH_SHORT).show()
             return
         }
-        CookieManager.getInstance().flush()
+        cookieManager().flush()
         val data = Intent()
             .putExtra(EXTRA_PROVIDER_ID, providerId)
             .putExtra(EXTRA_COOKIES_JSON, cookiesToJson(cookies))
@@ -117,8 +124,8 @@ class ProviderWebLoginActivity : Activity() {
 
     private fun collectCookies(currentUrl: String?): Map<String, String> {
         val result = linkedMapOf<String, String>()
-        listOfNotNull(loginUrl, currentUrl).forEach { url ->
-            CookieManager.getInstance().getCookie(url)
+        cookieLookupUrls(currentUrl).forEach { url ->
+            cookieManager().getCookie(url)
                 ?.split(";")
                 ?.forEach { part ->
                     val pieces = part.split("=", limit = 2)
@@ -138,6 +145,42 @@ class ProviderWebLoginActivity : Activity() {
         }
         return result
     }
+
+    private fun cookieLookupUrls(currentUrl: String?): List<String> {
+        val urls = linkedSetOf<String>()
+        listOf(loginUrl, currentUrl, webView.url, webView.originalUrl)
+            .filterNotNull()
+            .filter { it.isNotBlank() }
+            .forEach { urls.add(it) }
+        providerCookieHosts(providerId).forEach { host ->
+            urls.add("https://$host")
+            urls.add("http://$host")
+        }
+        return urls.toList()
+    }
+
+    private fun providerCookieHosts(providerId: String): List<String> {
+        return when (providerId) {
+            "netease" -> listOf(
+                "music.163.com",
+                "m.music.163.com",
+                "interface.music.163.com",
+                "interface3.music.163.com",
+            )
+            "qqmusic" -> listOf(
+                "y.qq.com",
+                "u.y.qq.com",
+                "i.y.qq.com",
+                "c.y.qq.com",
+                "graph.qq.com",
+                "ptlogin2.qq.com",
+                "qq.com",
+            )
+            else -> emptyList()
+        }
+    }
+
+    private fun cookieManager(): CookieManager = CookieManager.getInstance()
 
     private fun hasRequiredCookies(cookies: Map<String, String>): Boolean {
         if (cookieKeyGroups.isEmpty()) return cookies.isNotEmpty()

@@ -54,6 +54,12 @@ class FuoPlayerController(
         private set
     var selectedPlaylistError by mutableStateOf<String?>(null)
         private set
+    var selectedFeature by mutableStateOf<ProviderFeature?>(null)
+        private set
+    var selectedFeatureTracks by mutableStateOf<List<MusicTrack>>(emptyList())
+        private set
+    var selectedFeatureError by mutableStateOf<String?>(null)
+        private set
     var localTracks by mutableStateOf<List<MusicTrack>>(emptyList())
         private set
     var query by mutableStateOf("")
@@ -92,6 +98,7 @@ class FuoPlayerController(
         get() = isFullPlayerOpen ||
             isSettingsOpen ||
             isSearchOpen ||
+            selectedFeature != null ||
             selectedPlaylist != null
 
     private var queue: List<MusicTrack> = emptyList()
@@ -199,6 +206,10 @@ class FuoPlayerController(
             }
             isSearchOpen -> {
                 closeSearch()
+                true
+            }
+            selectedFeature != null -> {
+                closeFeature()
                 true
             }
             selectedPlaylist != null -> {
@@ -344,8 +355,12 @@ class FuoPlayerController(
                 }
                 withTimeout(30_000) {
                     providerFeatures.filter { it.category == category }.map { feature ->
-                        runCatching { providerRepository.loadFeature(feature) }
-                            .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
+                        if (feature.isDeferredHomeFeature()) {
+                            ProviderContentSection(feature)
+                        } else {
+                            runCatching { providerRepository.loadFeature(feature) }
+                                .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
+                        }
                     }
                 }
             }.onSuccess {
@@ -360,6 +375,51 @@ class FuoPlayerController(
             }
             isLoading = false
         }
+    }
+
+    fun openFeature(feature: ProviderFeature) {
+        selectedFeature = feature
+        selectedFeatureTracks = emptyList()
+        selectedFeatureError = null
+        scope.launch {
+            isLoading = true
+            message = "正在加载：${feature.title}"
+            val deferred = scope.async { providerRepository.loadFeature(feature) }
+            val result = withTimeoutOrNull(30_000) {
+                runCatching { deferred.await() }
+            }
+            if (result == null) {
+                deferred.cancel()
+                selectedFeatureError = "加载超时，请检查网络后重试"
+                message = selectedFeatureError.orEmpty()
+            } else {
+                result.onSuccess { section ->
+                    if (selectedFeature == feature) {
+                        selectedFeatureTracks = section.tracks
+                        selectedFeatureError = when {
+                            section.isLoginRequired -> "登录后显示 ${section.feature.providerName} 的个性化内容"
+                            section.errorMessage != null -> section.errorMessage
+                            else -> null
+                        }
+                        message = when {
+                            selectedFeatureError != null -> selectedFeatureError.orEmpty()
+                            section.tracks.isEmpty() -> "${feature.title} 暂无歌曲"
+                            else -> "${feature.title} · ${section.tracks.size} 首"
+                        }
+                    }
+                }.onFailure {
+                    selectedFeatureError = it.message ?: it::class.simpleName.orEmpty()
+                    setError(it)
+                }
+            }
+            isLoading = false
+        }
+    }
+
+    fun closeFeature() {
+        selectedFeature = null
+        selectedFeatureTracks = emptyList()
+        selectedFeatureError = null
     }
 
     fun openPlaylist(playlist: ProviderPlaylist) {
@@ -437,6 +497,15 @@ class FuoPlayerController(
 
     fun playAllFromSelectedPlaylist() {
         playFirst(selectedPlaylistTracks)
+    }
+
+    fun playFromSelectedFeature(index: Int) {
+        val track = selectedFeatureTracks.getOrNull(index) ?: return
+        play(track, selectedFeatureTracks, index)
+    }
+
+    fun playAllFromSelectedFeature() {
+        playFirst(selectedFeatureTracks)
     }
 
     fun playQueueIndex(index: Int) {
@@ -615,6 +684,10 @@ class FuoPlayerController(
 
     private fun providerName(providerId: String): String {
         return providers.firstOrNull { it.providerId == providerId }?.providerName ?: providerId
+    }
+
+    private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
+        return category == ProviderFeatureCategory.Recommend && id.endsWith("_daily_songs")
     }
 
     private fun applySettings(settings: AppSettings) {

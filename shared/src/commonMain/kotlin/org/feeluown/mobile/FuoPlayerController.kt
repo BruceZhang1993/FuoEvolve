@@ -79,6 +79,12 @@ class FuoPlayerController(
         private set
     var localMusicViewMode by mutableStateOf(LocalMusicViewMode.All)
         private set
+    var localMusicDirectories by mutableStateOf<List<LocalMusicDirectory>>(emptyList())
+        private set
+    var excludedLocalMusicDirectoryIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var localMusicMinDurationSeconds by mutableStateOf(DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS)
+        private set
     var isSearchOpen by mutableStateOf(false)
         private set
     var isFullPlayerOpen by mutableStateOf(false)
@@ -120,6 +126,7 @@ class FuoPlayerController(
         scope.launch {
             val loadedSettings = runCatching { settingsStore.load() }
             loadedSettings.onSuccess { applySettings(it) }
+            updateLocalMusicScanSettings()
             updateResourceCacheLimit()
             updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
@@ -191,7 +198,11 @@ class FuoPlayerController(
         scope.launch {
             isLoading = true
             message = "正在扫描本地音乐"
-            runCatching { localRepository.scan() }
+            runCatching {
+                updateLocalMusicScanSettings()
+                localMusicDirectories = localRepository.directories()
+                localRepository.scan()
+            }
                 .onSuccess {
                     localTracks = it
                     message = if (it.isEmpty()) "未发现本地音乐" else "本地音乐 ${it.size} 首"
@@ -243,6 +254,7 @@ class FuoPlayerController(
         isSettingsOpen = true
         refreshAllProviderAuthStates()
         refreshResourceCacheUsage()
+        refreshLocalMusicDirectories()
     }
 
     fun closeSettings() {
@@ -397,6 +409,22 @@ class FuoPlayerController(
     fun onLocalMusicViewModeChange(value: LocalMusicViewMode) {
         localMusicViewMode = value
         persistSettings()
+    }
+
+    fun onLocalMusicDirectoryEnabledChange(directoryId: String, enabled: Boolean) {
+        excludedLocalMusicDirectoryIds = if (enabled) {
+            excludedLocalMusicDirectoryIds - directoryId
+        } else {
+            excludedLocalMusicDirectoryIds + directoryId
+        }
+        persistSettings()
+        refreshLocalMusic()
+    }
+
+    fun onLocalMusicMinDurationChange(value: Int) {
+        localMusicMinDurationSeconds = value
+        persistSettings()
+        refreshLocalMusic()
     }
 
     fun search() {
@@ -788,6 +816,8 @@ class FuoPlayerController(
     private fun applySettings(settings: AppSettings) {
         homeSection = settings.homeSection
         localMusicViewMode = settings.localMusicViewMode
+        excludedLocalMusicDirectoryIds = settings.excludedLocalMusicDirectoryIds
+        localMusicMinDurationSeconds = settings.localMusicMinDurationSeconds
         searchScope = settings.searchScope
         selectedSearchProviderId = settings.selectedSearchProviderId
         selectedSettingsProviderId = settings.selectedSettingsProviderId
@@ -803,6 +833,8 @@ class FuoPlayerController(
         val settings = AppSettings(
             homeSection = homeSection,
             localMusicViewMode = localMusicViewMode,
+            excludedLocalMusicDirectoryIds = excludedLocalMusicDirectoryIds,
+            localMusicMinDurationSeconds = localMusicMinDurationSeconds,
             searchScope = searchScope,
             selectedSearchProviderId = selectedSearchProviderId,
             selectedSettingsProviderId = selectedSettingsProviderId,
@@ -829,6 +861,28 @@ class FuoPlayerController(
 
     private suspend fun updateAudioQualityPolicies() {
         providerRepository.updateAudioQualityPolicies(wifiAudioQualityPolicy, cellularAudioQualityPolicy)
+    }
+
+    private fun refreshLocalMusicDirectories() {
+        scope.launch {
+            runCatching {
+                updateLocalMusicScanSettings()
+                localRepository.directories()
+            }.onSuccess {
+                localMusicDirectories = it
+            }.onFailure {
+                setError(it)
+            }
+        }
+    }
+
+    private suspend fun updateLocalMusicScanSettings() {
+        localRepository.updateScanSettings(
+            LocalMusicScanSettings(
+                excludedDirectoryIds = excludedLocalMusicDirectoryIds,
+                minDurationSeconds = localMusicMinDurationSeconds,
+            )
+        )
     }
 
     private fun setError(throwable: Throwable) {

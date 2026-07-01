@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -910,6 +911,7 @@ private fun SettingsScreen(
                 }
             }
             AudioQualitySettingsPanel(controller)
+            LocalMusicScanSettingsPanel(controller)
             CacheSettingsPanel(controller)
         }
     }
@@ -1065,6 +1067,103 @@ private fun AudioQualityRow(
                 ) {
                     Text(policy.label)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicScanSettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "本地音乐扫描",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "目录",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (controller.localMusicDirectories.isEmpty()) {
+                Text(
+                    text = "授权并扫描本地音乐后显示媒体库目录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                controller.localMusicDirectories.forEach { directory ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                controller.onLocalMusicDirectoryEnabledChange(
+                                    directory.id,
+                                    directory.id in controller.excludedLocalMusicDirectoryIds,
+                                )
+                            },
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = directory.id !in controller.excludedLocalMusicDirectoryIds,
+                            onCheckedChange = {
+                                controller.onLocalMusicDirectoryEnabledChange(directory.id, it)
+                            },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = directory.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${directory.trackCount} 首",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+            LocalMusicDurationFilterRow(
+                selected = controller.localMusicMinDurationSeconds,
+                onSelect = controller::onLocalMusicMinDurationChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalMusicDurationFilterRow(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val options = listOf(0, 10, 30, 60, 90, 120)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = if (selected > 0) "过滤短音频：小于 ${selected} 秒" else "过滤短音频：不过滤",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            options.forEach { seconds ->
+                FilterChip(
+                    selected = selected == seconds,
+                    onClick = { onSelect(seconds) },
+                    label = { Text(if (seconds == 0) "不过滤" else "${seconds} 秒") },
+                )
             }
         }
     }

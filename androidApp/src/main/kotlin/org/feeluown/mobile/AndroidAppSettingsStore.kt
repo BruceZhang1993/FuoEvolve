@@ -12,6 +12,11 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         AppSettings(
             homeSection = enumValue(KEY_HOME_SECTION, HomeSection.Recommend),
             localMusicViewMode = enumValue(KEY_LOCAL_MUSIC_VIEW_MODE, LocalMusicViewMode.All),
+            excludedLocalMusicDirectoryIds = readStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS),
+            localMusicMinDurationSeconds = preferences.getInt(
+                KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS,
+                DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
+            ),
             searchScope = enumValue(KEY_SEARCH_SCOPE, SearchScope.All),
             selectedSearchProviderId = preferences.getString(KEY_SELECTED_SEARCH_PROVIDER_ID, null),
             selectedSettingsProviderId = preferences.getString(KEY_SELECTED_SETTINGS_PROVIDER_ID, null),
@@ -32,6 +37,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             preferences.edit()
                 .putString(KEY_HOME_SECTION, settings.homeSection.name)
                 .putString(KEY_LOCAL_MUSIC_VIEW_MODE, settings.localMusicViewMode.name)
+                .putStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS, settings.excludedLocalMusicDirectoryIds)
+                .putInt(KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS, settings.localMusicMinDurationSeconds)
                 .putString(KEY_SEARCH_SCOPE, settings.searchScope.name)
                 .putNullableString(KEY_SELECTED_SEARCH_PROVIDER_ID, settings.selectedSearchProviderId)
                 .putNullableString(KEY_SELECTED_SETTINGS_PROVIDER_ID, settings.selectedSettingsProviderId)
@@ -78,6 +85,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         return json.toString()
     }
 
+    private fun readStringSet(key: String): Set<String> {
+        return preferences.getStringSet(key, emptySet()).orEmpty().filter { it.isNotBlank() }.toSet()
+    }
+
     private fun android.content.SharedPreferences.Editor.putNullableString(key: String, value: String?) =
         if (value == null) remove(key) else putString(key, value)
 
@@ -85,6 +96,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val PREFS_NAME = "fuo_settings"
         private const val KEY_HOME_SECTION = "home_section"
         private const val KEY_LOCAL_MUSIC_VIEW_MODE = "local_music_view_mode"
+        private const val KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS = "excluded_local_music_directory_ids"
+        private const val KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS = "local_music_min_duration_seconds"
         private const val KEY_SEARCH_SCOPE = "search_scope"
         private const val KEY_SELECTED_SEARCH_PROVIDER_ID = "selected_search_provider_id"
         private const val KEY_SELECTED_SETTINGS_PROVIDER_ID = "selected_settings_provider_id"

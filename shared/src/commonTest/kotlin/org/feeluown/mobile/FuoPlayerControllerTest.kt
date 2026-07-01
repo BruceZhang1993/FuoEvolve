@@ -227,6 +227,8 @@ class FuoPlayerControllerTest {
             AppSettings(
                 homeSection = HomeSection.Local,
                 localMusicViewMode = LocalMusicViewMode.Album,
+                excludedLocalMusicDirectoryIds = setOf("Podcasts/"),
+                localMusicMinDurationSeconds = 30,
                 providerLoginMode = ProviderLoginMode.Cookie,
                 providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
                 audioCacheLimitMb = 256,
@@ -236,12 +238,15 @@ class FuoPlayerControllerTest {
             ),
         )
         val provider = FakeProviderRepository(emptyList())
+        val local = FakeLocalMusicRepository(
+            directories = listOf(LocalMusicDirectory("Podcasts/", "Podcasts", 2)),
+        )
         val cache = FakeResourceCacheRepository()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
             val controller = FuoPlayerController(
                 providerRepository = provider,
-                localRepository = FakeLocalMusicRepository(),
+                localRepository = local,
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
                 settingsStore = store,
@@ -253,6 +258,9 @@ class FuoPlayerControllerTest {
 
             assertEquals(HomeSection.Local, controller.homeSection)
             assertEquals(LocalMusicViewMode.Album, controller.localMusicViewMode)
+            assertEquals(setOf("Podcasts/"), controller.excludedLocalMusicDirectoryIds)
+            assertEquals(30, controller.localMusicMinDurationSeconds)
+            assertEquals(LocalMusicScanSettings(setOf("Podcasts/"), 30), local.lastSettings)
             assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
             assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
             assertEquals(256, controller.audioCacheLimitMb)
@@ -265,6 +273,8 @@ class FuoPlayerControllerTest {
 
             controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            controller.onLocalMusicDirectoryEnabledChange("Podcasts/", enabled = true)
+            controller.onLocalMusicMinDurationChange(60)
             controller.onAudioCacheLimitChange(1024)
             controller.onImageCacheLimitChange(256)
             controller.onWifiAudioQualityPolicyChange(AudioQualityPolicy.High)
@@ -273,6 +283,9 @@ class FuoPlayerControllerTest {
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
             assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
+            assertEquals(emptySet(), store.saved.excludedLocalMusicDirectoryIds)
+            assertEquals(60, store.saved.localMusicMinDurationSeconds)
+            assertEquals(LocalMusicScanSettings(emptySet(), 60), local.lastSettings)
             assertEquals(1024, store.saved.audioCacheLimitMb)
             assertEquals(256, store.saved.imageCacheLimitMb)
             assertEquals(CacheLimit(1024L * 1024L * 1024L, 256L * 1024L * 1024L), cache.lastLimit)
@@ -436,7 +449,17 @@ class FuoPlayerControllerTest {
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
     }
 
-    private class FakeLocalMusicRepository : LocalMusicRepository {
+    private class FakeLocalMusicRepository(
+        private val directories: List<LocalMusicDirectory> = emptyList(),
+    ) : LocalMusicRepository {
+        var lastSettings = LocalMusicScanSettings()
+
+        override suspend fun updateScanSettings(settings: LocalMusicScanSettings) {
+            lastSettings = settings
+        }
+
+        override suspend fun directories(): List<LocalMusicDirectory> = directories
+
         override suspend fun scan(): List<MusicTrack> = emptyList()
 
         override suspend fun search(keyword: String): List<MusicTrack> = emptyList()

@@ -27,6 +27,8 @@ enum class AudioQualityPolicy(
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
+    val excludedLocalMusicDirectoryIds: Set<String> = emptySet(),
+    val localMusicMinDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
     val searchScope: SearchScope = SearchScope.All,
     val selectedSearchProviderId: String? = null,
     val selectedSettingsProviderId: String? = null,
@@ -40,8 +42,20 @@ data class AppSettings(
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
+const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
 val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
+
+data class LocalMusicScanSettings(
+    val excludedDirectoryIds: Set<String> = emptySet(),
+    val minDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
+)
+
+data class LocalMusicDirectory(
+    val id: String,
+    val name: String,
+    val trackCount: Int,
+)
 
 data class MusicTrack(
     val id: String,
@@ -177,6 +191,8 @@ interface ProviderMusicRepository {
 }
 
 interface LocalMusicRepository {
+    suspend fun updateScanSettings(settings: LocalMusicScanSettings)
+    suspend fun directories(): List<LocalMusicDirectory>
     suspend fun scan(): List<MusicTrack>
     suspend fun search(keyword: String): List<MusicTrack>
 }

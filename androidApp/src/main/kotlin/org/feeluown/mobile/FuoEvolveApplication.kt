@@ -42,10 +42,21 @@ class FuoEvolveApplication : PyApplication() {
             settingsStore = settingsStore,
             resourceCacheRepository = resourceCacheRepository,
             scope = appScope,
-        )
+        ).also { controller ->
+            FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {
+                override fun previous() {
+                    controller.previous()
+                }
+
+                override fun next() {
+                    controller.next()
+                }
+            }
+        }
     }
 
     override fun onTerminate() {
+        FuoPlaybackService.transportControls = null
         appScope.cancel()
         super.onTerminate()
     }

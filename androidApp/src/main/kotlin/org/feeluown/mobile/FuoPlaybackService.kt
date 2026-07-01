@@ -13,19 +13,56 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionCommands
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import org.json.JSONObject
 
 class FuoPlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         val exoPlayer = ExoPlayer.Builder(this).build()
         player = exoPlayer
-        mediaSession = MediaSession.Builder(this, exoPlayer).build()
+        mediaSession = MediaSession.Builder(this, exoPlayer)
+            .setCallback(object : MediaSession.Callback {
+                override fun onConnect(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                ): MediaSession.ConnectionResult {
+                    val commands = SessionCommands.Builder()
+                        .addSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.commands)
+                        .add(COMMAND_PREVIOUS)
+                        .add(COMMAND_NEXT)
+                        .build()
+                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(commands)
+                        .build()
+                }
+
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: Bundle,
+                ): ListenableFuture<SessionResult> {
+                    when (customCommand.customAction) {
+                        ACTION_PREVIOUS -> transportControls?.previous()
+                        ACTION_NEXT -> transportControls?.next()
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+            })
+            .setMediaButtonPreferences(mediaButtonPreferences())
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -123,7 +160,14 @@ class FuoPlaybackService : MediaSessionService() {
         private const val ACTION_PAUSE = "org.feeluown.mobile.action.PAUSE"
         private const val ACTION_RESUME = "org.feeluown.mobile.action.RESUME"
         private const val ACTION_STOP = "org.feeluown.mobile.action.STOP"
+        private const val ACTION_PREVIOUS = "org.feeluown.mobile.action.PREVIOUS"
+        private const val ACTION_NEXT = "org.feeluown.mobile.action.NEXT"
         private const val EXTRA_PAYLOAD = "payload"
+        private val COMMAND_PREVIOUS = SessionCommand(ACTION_PREVIOUS, Bundle.EMPTY)
+        private val COMMAND_NEXT = SessionCommand(ACTION_NEXT, Bundle.EMPTY)
+
+        @Volatile
+        var transportControls: TransportControls? = null
 
         fun play(context: Context, payload: String) {
             start(context, Intent(context, FuoPlaybackService::class.java).apply {
@@ -147,5 +191,24 @@ class FuoPlaybackService : MediaSessionService() {
         private fun start(context: Context, intent: Intent) {
             context.startService(intent)
         }
+
+        @OptIn(UnstableApi::class)
+        private fun mediaButtonPreferences(): List<CommandButton> = listOf(
+            CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+                .setSessionCommand(COMMAND_PREVIOUS)
+                .setDisplayName("上一首")
+                .setSlots(CommandButton.SLOT_BACK)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_NEXT)
+                .setSessionCommand(COMMAND_NEXT)
+                .setDisplayName("下一首")
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .build(),
+        )
+    }
+
+    interface TransportControls {
+        fun previous()
+        fun next()
     }
 }

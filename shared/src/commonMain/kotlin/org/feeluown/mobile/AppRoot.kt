@@ -70,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -1614,16 +1615,20 @@ private fun MiniPlayer(controller: FuoPlayerController) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = controller::previous) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "上一首")
-            }
+            RoundControlButton(
+                imageVector = Icons.Filled.SkipPrevious,
+                contentDescription = "上一首",
+                onClick = controller::previous,
+            )
             PlayPauseButton(
                 isPlaying = state.status == PlayerStatus.Playing,
                 onClick = controller::toggle,
             )
-            IconButton(onClick = controller::next) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "下一首")
-            }
+            RoundControlButton(
+                imageVector = Icons.Filled.SkipNext,
+                contentDescription = "下一首",
+                onClick = controller::next,
+            )
         }
     }
 }
@@ -1661,7 +1666,6 @@ private fun FullPlayer(controller: FuoPlayerController) {
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
                     }
                 }
-                PlayerInfoTags(currentTrack, state.audioQuality)
                 TabRow(selectedTabIndex = visualTab.ordinal) {
                     PlayerVisualTab.entries.forEach { tab ->
                         Tab(
@@ -1685,12 +1689,7 @@ private fun FullPlayer(controller: FuoPlayerController) {
                             .weight(1f),
                     )
                 }
-                Text(
-                    text = currentTrack?.title ?: "未播放",
-                    style = MaterialTheme.typography.headlineSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                PlayerTitleRow(currentTrack, state.audioQuality)
                 Text(
                     text = currentTrack?.artists ?: "",
                     style = MaterialTheme.typography.bodyLarge,
@@ -1704,16 +1703,23 @@ private fun FullPlayer(controller: FuoPlayerController) {
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = controller::previous) {
-                        Icon(Icons.Filled.SkipPrevious, contentDescription = "上一首")
-                    }
+                    RoundControlButton(
+                        imageVector = Icons.Filled.SkipPrevious,
+                        contentDescription = "上一首",
+                        onClick = controller::previous,
+                    )
                     PlayPauseButton(
                         isPlaying = state.status == PlayerStatus.Playing,
                         onClick = controller::toggle,
+                        size = 64.dp,
+                        iconSize = 34.dp,
+                        prominent = true,
                     )
-                    IconButton(onClick = controller::next) {
-                        Icon(Icons.Filled.SkipNext, contentDescription = "下一首")
-                    }
+                    RoundControlButton(
+                        imageVector = Icons.Filled.SkipNext,
+                        contentDescription = "下一首",
+                        onClick = controller::next,
+                    )
                 }
             }
             if (controller.isQueueOpen) {
@@ -1729,11 +1735,27 @@ private enum class PlayerVisualTab(val title: String) {
 }
 
 @Composable
+private fun PlayerTitleRow(track: MusicTrack?, audioQuality: String?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            modifier = Modifier.weight(1f),
+            text = track?.title ?: "未播放",
+            style = MaterialTheme.typography.headlineSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        PlayerInfoTags(track, audioQuality)
+    }
+}
+
+@Composable
 private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (track != null) {
@@ -1822,13 +1844,49 @@ private fun emptyDisplayTrack() = MusicTrack(
 )
 
 @Composable
-private fun PlayPauseButton(isPlaying: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(
-            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            contentDescription = if (isPlaying) "暂停" else "播放",
-        )
+private fun RoundControlButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 48.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 26.dp,
+    prominent: Boolean = false,
+) {
+    Surface(
+        modifier = Modifier
+            .size(size)
+            .clickable(onClick = onClick),
+        color = if (prominent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        tonalElevation = if (prominent) 3.dp else 1.dp,
+        shape = RoundedCornerShape(50),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(iconSize),
+            )
+        }
     }
+}
+
+@Composable
+private fun PlayPauseButton(
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 52.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 28.dp,
+    prominent: Boolean = false,
+) {
+    RoundControlButton(
+        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+        contentDescription = if (isPlaying) "暂停" else "播放",
+        onClick = onClick,
+        size = size,
+        iconSize = iconSize,
+        prominent = prominent,
+    )
 }
 
 @Composable

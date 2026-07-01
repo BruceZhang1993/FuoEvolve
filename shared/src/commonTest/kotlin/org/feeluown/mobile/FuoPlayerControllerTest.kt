@@ -231,13 +231,16 @@ class FuoPlayerControllerTest {
                 providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"saved"}"""),
                 audioCacheLimitMb = 256,
                 imageCacheLimitMb = 64,
+                wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
+                cellularAudioQualityPolicy = AudioQualityPolicy.Low,
             ),
         )
+        val provider = FakeProviderRepository(emptyList())
         val cache = FakeResourceCacheRepository()
         val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         try {
             val controller = FuoPlayerController(
-                providerRepository = FakeProviderRepository(emptyList()),
+                providerRepository = provider,
                 localRepository = FakeLocalMusicRepository(),
                 downloadRepository = FakeDownloadRepository(emptyMap()),
                 playbackEngine = FakePlaybackEngine(),
@@ -255,11 +258,17 @@ class FuoPlayerControllerTest {
             assertEquals(256, controller.audioCacheLimitMb)
             assertEquals(64, controller.imageCacheLimitMb)
             assertEquals(CacheLimit(256L * 1024L * 1024L, 64L * 1024L * 1024L), cache.lastLimit)
+            assertEquals(AudioQualityPolicy.Highest, controller.wifiAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.Low, controller.cellularAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
             controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
             controller.onAudioCacheLimitChange(1024)
             controller.onImageCacheLimitChange(256)
+            controller.onWifiAudioQualityPolicyChange(AudioQualityPolicy.High)
+            controller.onCellularAudioQualityPolicyChange(AudioQualityPolicy.Standard)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -267,6 +276,45 @@ class FuoPlayerControllerTest {
             assertEquals(1024, store.saved.audioCacheLimitMb)
             assertEquals(256, store.saved.imageCacheLimitMb)
             assertEquals(CacheLimit(1024L * 1024L * 1024L, 256L * 1024L * 1024L), cache.lastLimit)
+            assertEquals(AudioQualityPolicy.High, store.saved.wifiAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.Standard, store.saved.cellularAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
+            assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun logoutProviderClearsAuthAndCookieDraft() = runTest {
+        val store = FakeSettingsStore(
+            AppSettings(providerCookieInputs = mapOf("netease" to """{"MUSIC_U":"draft"}""")),
+        )
+        val provider = FakeProviderRepository(emptyList())
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = store,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.loginProviderWithCookies("netease", """{"MUSIC_U":"saved"}""")
+            advanceUntilIdle()
+            assertEquals(true, controller.authStateFor(ProviderInfo("netease", "网易云音乐")).isLoggedIn)
+
+            controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            controller.logoutProvider("netease")
+            advanceUntilIdle()
+
+            assertEquals(1, provider.logoutCount)
+            assertEquals(false, controller.authStateFor(ProviderInfo("netease", "网易云音乐")).isLoggedIn)
+            assertEquals("", controller.cookieInputFor("netease"))
+            assertEquals(null, store.saved.providerCookieInputs["netease"])
         } finally {
             controllerScope.cancel()
         }
@@ -323,6 +371,9 @@ class FuoPlayerControllerTest {
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
     ) : ProviderMusicRepository {
         var resolveCount = 0
+        var logoutCount = 0
+        var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
+        var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
         val loadedFeatureIds = mutableListOf<String>()
 
         override suspend fun initialize() = Unit
@@ -357,6 +408,23 @@ class FuoPlayerControllerTest {
                 isLoggedIn = true,
                 userName = "tester",
             )
+
+        override suspend fun logout(providerId: String): ProviderAuthState {
+            logoutCount += 1
+            return ProviderAuthState(
+                providerId = providerId,
+                providerName = providerId,
+                isLoggedIn = false,
+            )
+        }
+
+        override suspend fun updateAudioQualityPolicies(
+            wifiPolicy: AudioQualityPolicy,
+            cellularPolicy: AudioQualityPolicy,
+        ) {
+            lastWifiAudioQualityPolicy = wifiPolicy
+            lastCellularAudioQualityPolicy = cellularPolicy
+        }
 
         override suspend fun features(): List<ProviderFeature> = features
 

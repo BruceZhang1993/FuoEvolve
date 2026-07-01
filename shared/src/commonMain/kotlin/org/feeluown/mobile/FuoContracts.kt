@@ -14,6 +14,16 @@ enum class ProviderLoginMode {
     Cookie,
 }
 
+enum class AudioQualityPolicy(
+    val label: String,
+    val policy: String,
+) {
+    Highest("最高", ">>>"),
+    High("高", "hq<>"),
+    Standard("标准", "sq<>"),
+    Low("低流量", "lq<>"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
@@ -24,10 +34,14 @@ data class AppSettings(
     val providerCookieInputs: Map<String, String> = emptyMap(),
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
+    val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
+    val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
 )
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
+val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
+val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 
 data class MusicTrack(
     val id: String,
@@ -153,6 +167,8 @@ interface ProviderMusicRepository {
     suspend fun resolve(track: MusicTrack): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
+    suspend fun logout(providerId: String): ProviderAuthState
+    suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy)
     suspend fun features(): List<ProviderFeature>
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>

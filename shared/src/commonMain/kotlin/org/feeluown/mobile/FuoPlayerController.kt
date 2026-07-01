@@ -101,6 +101,10 @@ class FuoPlayerController(
         private set
     var imageCacheLimitMb by mutableStateOf(DEFAULT_IMAGE_CACHE_LIMIT_MB)
         private set
+    var wifiAudioQualityPolicy by mutableStateOf(DEFAULT_WIFI_AUDIO_QUALITY_POLICY)
+        private set
+    var cellularAudioQualityPolicy by mutableStateOf(DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY)
+        private set
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
             isSettingsOpen ||
@@ -117,6 +121,7 @@ class FuoPlayerController(
             val loadedSettings = runCatching { settingsStore.load() }
             loadedSettings.onSuccess { applySettings(it) }
             updateResourceCacheLimit()
+            updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
             runCatching {
                 providerRepository.initialize()
@@ -327,6 +332,38 @@ class FuoPlayerController(
                 .onFailure { setError(it) }
             isLoading = false
         }
+    }
+
+    fun logoutProvider(providerId: String) {
+        val providerName = providerName(providerId)
+        scope.launch {
+            isLoading = true
+            message = "正在退出 $providerName"
+            runCatching { providerRepository.logout(providerId) }
+                .onSuccess {
+                    providerAuthStates = providerAuthStates + (providerId to it)
+                    providerCookieInputs = providerCookieInputs - providerId
+                    persistSettings()
+                    message = "${it.providerName} 已退出登录"
+                    if (homeSection != HomeSection.Local) {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
+    fun onWifiAudioQualityPolicyChange(value: AudioQualityPolicy) {
+        wifiAudioQualityPolicy = value
+        persistSettings()
+        scope.launch { updateAudioQualityPolicies() }
+    }
+
+    fun onCellularAudioQualityPolicyChange(value: AudioQualityPolicy) {
+        cellularAudioQualityPolicy = value
+        persistSettings()
+        scope.launch { updateAudioQualityPolicies() }
     }
 
     fun onQueryChange(value: String) {
@@ -756,6 +793,8 @@ class FuoPlayerController(
         providerCookieInputs = settings.providerCookieInputs
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
+        wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
+        cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
     }
 
     private fun persistSettings() {
@@ -769,6 +808,8 @@ class FuoPlayerController(
             providerCookieInputs = providerCookieInputs,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
+            wifiAudioQualityPolicy = wifiAudioQualityPolicy,
+            cellularAudioQualityPolicy = cellularAudioQualityPolicy,
         )
         scope.launch {
             settingsStore.save(settings)
@@ -782,6 +823,10 @@ class FuoPlayerController(
                 imageMaxBytes = imageCacheLimitMb.mbToBytes(),
             ),
         )
+    }
+
+    private suspend fun updateAudioQualityPolicies() {
+        providerRepository.updateAudioQualityPolicies(wifiAudioQualityPolicy, cellularAudioQualityPolicy)
     }
 
     private fun setError(throwable: Throwable) {

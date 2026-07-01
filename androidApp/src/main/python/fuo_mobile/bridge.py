@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 import sys
 import types
 from dataclasses import dataclass
@@ -322,12 +324,13 @@ class FuoMobileBridge:
                 tracks.append(track)
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def resolve(self, track_id: str) -> str:
+    def resolve(self, track_id: str, audio_select_policy: str = "") -> str:
         song = self._tracks.get(track_id)
         if song is None:
             song = self._song_from_track_id(track_id)
             self._tracks[track_id] = song
-        payload = self._prepare_payload(song)
+        policy = audio_select_policy or self.app.config.AUDIO_SELECT_POLICY
+        payload = self._prepare_payload(song, policy)
         return json.dumps(payload, ensure_ascii=False)
 
     def play(self, track_id: str) -> str:
@@ -354,6 +357,12 @@ class FuoMobileBridge:
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def provider_logout(self, provider_id: str) -> str:
+        provider = self._get_provider(provider_id)
+        provider.auth(None)
+        self._delete_saved_login(provider_id)
+        return json.dumps(provider_auth_state(provider, None), ensure_ascii=False)
 
     def load_feature(self, feature_id: str) -> str:
         feature = self._feature_by_id(feature_id)
@@ -474,7 +483,6 @@ class FuoMobileBridge:
 
     def _save_login(self, provider_id: str, user, cookies: Dict[str, str]) -> None:
         if provider_id == "netease":
-            import os
             from fuo_netease.login_controller import LoginController
             from fuo_netease.consts import USERS_INFO_FILE
 
@@ -484,6 +492,18 @@ class FuoMobileBridge:
             from fuo_qqmusic.login import write_cookies
 
             write_cookies(user, cookies)
+
+    def _delete_saved_login(self, provider_id: str) -> None:
+        if provider_id == "netease":
+            from fuo_netease.consts import USERS_INFO_FILE
+
+            if os.path.exists(USERS_INFO_FILE):
+                os.remove(USERS_INFO_FILE)
+        elif provider_id == "qqmusic":
+            from fuo_qqmusic.login import USER_INFO_FILE
+
+            if os.path.exists(USER_INFO_FILE):
+                os.remove(USER_INFO_FILE)
 
     def _restore_saved_logins(self) -> None:
         for provider_id in self.provider_registry.provider_ids:
@@ -511,14 +531,49 @@ class FuoMobileBridge:
             provider.auth(user)
             bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
-    def _prepare_payload(self, song) -> Dict[str, Any]:
+    def _prepare_payload(self, song, audio_select_policy: str) -> Dict[str, Any]:
         try:
             media = self.app.library.song_prepare_media(
                 song,
-                self.app.config.AUDIO_SELECT_POLICY,
+                audio_select_policy,
             )
         except MediaNotFound as exc:
+            standby_payload = self._prepare_standby_payload(song, audio_select_policy)
+            if standby_payload is not None:
+                return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
+        payload = self._payload_from_media(song, media)
+        return payload
+
+    def _prepare_standby_payload(self, song, audio_select_policy: str) -> Optional[Dict[str, Any]]:
+        source = getattr(song, "source", "")
+        source_in = [provider_id for provider_id in self.provider_registry.provider_ids if provider_id != source]
+        if not source_in:
+            return None
+        bridge_log(f"standby start song={getattr(song, 'title', '')} source_in={source_in}")
+        try:
+            standby_list = asyncio.run(
+                self.app.library.a_list_song_standby_v2(
+                    song,
+                    audio_select_policy=audio_select_policy,
+                    source_in=source_in,
+                    limit=1,
+                )
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"standby failed: {exc}")
+            return None
+        if not standby_list:
+            bridge_log("standby empty")
+            return None
+        standby, media = standby_list[0]
+        self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
+        bridge_log(
+            f"standby selected source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+        )
+        return self._payload_from_media(standby, media)
+
+    def _payload_from_media(self, song, media: Media) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
         cover = self.app.library.model_get_cover(song)
         if cover:

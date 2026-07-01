@@ -1,6 +1,8 @@
 package org.feeluown.mobile
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
@@ -14,6 +16,10 @@ class AndroidFuoCoreBridge(
 ) : ProviderMusicRepository {
     @Volatile
     private var bridge: PyObject? = null
+    @Volatile
+    private var wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY
+    @Volatile
+    private var cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY
 
     override suspend fun initialize() {
         withContext(Dispatchers.IO) {
@@ -70,8 +76,9 @@ class AndroidFuoCoreBridge(
         return withContext(Dispatchers.IO) {
             val trackId = track.providerId ?: track.id
             try {
-                Log.d(TAG, "resolve start trackId=$trackId")
-                val raw = requireNotNull(bridge).callAttr("resolve", trackId).toString()
+                val policy = currentAudioQualityPolicy()
+                Log.d(TAG, "resolve start trackId=$trackId policy=${policy.policy}")
+                val raw = requireNotNull(bridge).callAttr("resolve", trackId, policy.policy).toString()
                 JSONObject(raw).toPayload(track).also {
                     Log.d(TAG, "resolve done title=${it.title}")
                 }
@@ -80,6 +87,11 @@ class AndroidFuoCoreBridge(
                 throw throwable
             }
         }
+    }
+
+    override suspend fun updateAudioQualityPolicies(wifiPolicy: AudioQualityPolicy, cellularPolicy: AudioQualityPolicy) {
+        wifiAudioQualityPolicy = wifiPolicy
+        cellularAudioQualityPolicy = cellularPolicy
     }
 
     override suspend fun authState(providerId: String): ProviderAuthState {
@@ -94,6 +106,14 @@ class AndroidFuoCoreBridge(
         initialize()
         return withContext(Dispatchers.IO) {
             val raw = requireNotNull(bridge).callAttr("provider_login_with_cookies", providerId, cookiesJson).toString()
+            JSONObject(raw).toAuthState(providerId)
+        }
+    }
+
+    override suspend fun logout(providerId: String): ProviderAuthState {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            val raw = requireNotNull(bridge).callAttr("provider_logout", providerId).toString()
             JSONObject(raw).toAuthState(providerId)
         }
     }
@@ -231,6 +251,17 @@ class AndroidFuoCoreBridge(
         isLoggedIn = optBoolean("is_logged_in"),
         userName = optString("user_name").takeIf { it.isNotBlank() },
     )
+
+    private fun currentAudioQualityPolicy(): AudioQualityPolicy {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return wifiAudioQualityPolicy
+        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
+        return if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) {
+            cellularAudioQualityPolicy
+        } else {
+            wifiAudioQualityPolicy
+        }
+    }
 
     private fun JSONArray?.toStringGroups(): List<List<String>> {
         if (this == null) return emptyList()

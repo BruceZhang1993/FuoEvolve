@@ -71,6 +71,7 @@ from feeluown.config import Config
 from feeluown.library import Library
 from feeluown.library.base import SearchType
 from feeluown.library.excs import MediaNotFound
+from feeluown.library.provider_protocol import SupportsSongMultiQuality
 from feeluown.media import Media
 from feeluown.player.base_player import AbstractPlayer, State
 from feeluown.utils.dispatch import Signal
@@ -533,16 +534,13 @@ class FuoMobileBridge:
 
     def _prepare_payload(self, song, audio_select_policy: str) -> Dict[str, Any]:
         try:
-            media = self.app.library.song_prepare_media(
-                song,
-                audio_select_policy,
-            )
+            media, quality = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
             standby_payload = self._prepare_standby_payload(song, audio_select_policy)
             if standby_payload is not None:
                 return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
-        payload = self._payload_from_media(song, media)
+        payload = self._payload_from_media(song, media, quality)
         return payload
 
     def _prepare_standby_payload(self, song, audio_select_policy: str) -> Optional[Dict[str, Any]]:
@@ -566,15 +564,28 @@ class FuoMobileBridge:
         if not standby_list:
             bridge_log("standby empty")
             return None
-        standby, media = standby_list[0]
+        standby, _ = standby_list[0]
         self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
         bridge_log(
             f"standby selected source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
         )
-        return self._payload_from_media(standby, media)
+        try:
+            media, quality = self._select_media(standby, audio_select_policy)
+        except MediaNotFound:
+            return None
+        return self._payload_from_media(standby, media, quality)
 
-    def _payload_from_media(self, song, media: Media) -> Dict[str, Any]:
+    def _select_media(self, song, audio_select_policy: str):
+        provider = self.app.library.get(getattr(song, "source", ""))
+        if provider is not None and isinstance(provider, SupportsSongMultiQuality):
+            media, quality = provider.song_select_media(song, audio_select_policy)
+            return media, getattr(quality, "value", str(quality)).upper()
+        return self.app.library.song_prepare_media(song, audio_select_policy), ""
+
+    def _payload_from_media(self, song, media: Media, quality: str) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
+        if quality:
+            payload["audio_quality"] = quality
         cover = self.app.library.model_get_cover(song)
         if cover:
             payload["cover_url"] = cover

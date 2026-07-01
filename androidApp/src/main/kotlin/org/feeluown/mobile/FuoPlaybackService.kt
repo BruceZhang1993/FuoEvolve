@@ -66,6 +66,7 @@ class FuoPlaybackService : MediaSessionService() {
             putString("provider_id", payload.optString("provider_id"))
             putString("provider_name", payload.optString("provider_name"))
             putString("lyrics", payload.optString("lyrics"))
+            putString("audio_quality", payload.optString("audio_quality"))
         }
         val mediaItem = MediaItem.Builder()
             .setMediaId(payload.optString("track_id").ifBlank { payload.getString("url") })

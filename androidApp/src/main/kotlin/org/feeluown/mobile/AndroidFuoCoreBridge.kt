@@ -243,6 +243,7 @@ class AndroidFuoCoreBridge(
         coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
         durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
         lyrics = optString("lyrics").takeIf { it.isNotBlank() },
+        audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
     )
 
     private fun JSONObject.toAuthState(providerId: String): ProviderAuthState = ProviderAuthState(

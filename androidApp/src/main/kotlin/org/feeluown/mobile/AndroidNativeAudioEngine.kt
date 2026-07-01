@@ -44,6 +44,7 @@ class AndroidNativeAudioEngine(
             positionMs = 0,
             durationMs = payload.durationMs ?: 0,
             lyrics = payload.lyrics,
+            audioQuality = payload.audioQuality,
             errorMessage = null,
         )
         FuoPlaybackService.play(context, payload.toJson(track))
@@ -125,6 +126,10 @@ class AndroidNativeAudioEngine(
                 ?.extras
                 ?.getString("lyrics")
                 ?.takeIf { it.isNotBlank() },
+            audioQuality = mutableState.value.audioQuality ?: controller.currentMediaItem?.mediaMetadata
+                ?.extras
+                ?.getString("audio_quality")
+                ?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -161,6 +166,7 @@ class AndroidNativeAudioEngine(
             .put("cover_url", coverUrl ?: "")
             .put("duration_ms", durationMs ?: 0)
             .put("lyrics", lyrics ?: "")
+            .put("audio_quality", audioQuality ?: "")
             .toString()
     }
 

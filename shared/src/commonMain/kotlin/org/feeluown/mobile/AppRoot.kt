@@ -1,9 +1,11 @@
 package org.feeluown.mobile
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,7 +63,10 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1624,98 +1631,195 @@ private fun MiniPlayer(controller: FuoPlayerController) {
 @Composable
 private fun FullPlayer(controller: FuoPlayerController) {
     val state = controller.playbackState
+    val currentTrack = state.currentTrack
+    var visualTab by remember(currentTrack?.id) { mutableStateOf(PlayerVisualTab.Cover) }
     Surface(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                IconButton(onClick = controller::closeFullPlayer) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = controller::closeFullPlayer) {
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起播放器")
+                    }
+                    Text(
+                        text = "正在播放",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    IconButton(onClick = controller::toggleQueue) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
+                    }
+                }
+                PlayerInfoTags(currentTrack, state.audioQuality)
+                TabRow(selectedTabIndex = visualTab.ordinal) {
+                    PlayerVisualTab.entries.forEach { tab ->
+                        Tab(
+                            selected = visualTab == tab,
+                            onClick = { visualTab = tab },
+                            text = { Text(tab.title) },
+                        )
+                    }
+                }
+                when (visualTab) {
+                    PlayerVisualTab.Cover -> CoverBox(
+                        track = currentTrack ?: emptyDisplayTrack(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                    PlayerVisualTab.Lyrics -> LyricsPanel(
+                        state = state,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
                 }
                 Text(
-                    text = "正在播放",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    text = currentTrack?.title ?: "未播放",
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                IconButton(onClick = controller::toggleQueue) {
-                    Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "播放队列")
-                }
-            }
-            state.currentTrack?.let {
-                CoverBox(
-                    track = it,
-                    modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp),
+                Text(
+                    text = currentTrack?.artists ?: "",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            } ?: CoverBox(
-                track = MusicTrack(
-                    id = "empty",
-                    title = "FeelUOwn",
-                    artists = "",
-                    album = "",
-                    source = "",
-                    sourceType = TrackSourceType.LocalMediaStore,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp),
-            )
-            Text(
-                text = state.currentTrack?.title ?: "未播放",
-                style = MaterialTheme.typography.headlineSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = state.currentTrack?.artists ?: "",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            ProgressBlock(state, controller::seekTo)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = controller::previous) {
-                    Icon(Icons.Filled.SkipPrevious, contentDescription = "上一首")
-                }
-                PlayPauseButton(
-                    isPlaying = state.status == PlayerStatus.Playing,
-                    onClick = controller::toggle,
-                )
-                IconButton(onClick = controller::next) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = "下一首")
+                ProgressBlock(state, controller::seekTo)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = controller::previous) {
+                        Icon(Icons.Filled.SkipPrevious, contentDescription = "上一首")
+                    }
+                    PlayPauseButton(
+                        isPlaying = state.status == PlayerStatus.Playing,
+                        onClick = controller::toggle,
+                    )
+                    IconButton(onClick = controller::next) {
+                        Icon(Icons.Filled.SkipNext, contentDescription = "下一首")
+                    }
                 }
             }
             if (controller.isQueueOpen) {
+                QueueBottomSheet(controller)
+            }
+        }
+    }
+}
+
+private enum class PlayerVisualTab(val title: String) {
+    Cover("封面"),
+    Lyrics("歌词"),
+}
+
+@Composable
+private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (track != null) {
+            InfoTag(sourceLabel(track, null))
+        }
+        audioQuality?.takeIf { it.isNotBlank() }?.let {
+            InfoTag(it.uppercase())
+        }
+    }
+}
+
+@Composable
+private fun InfoTag(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun QueueBottomSheet(controller: FuoPlayerController) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .clickable(onClick = controller::toggleQueue),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .navigationBarsPadding()
+                .clickable { },
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "播放队列",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "${controller.playbackState.queue.size} 首",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 QueueList(
                     controller = controller,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                )
-            } else {
-                LyricsPanel(
-                    state = state,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                        .heightIn(max = 380.dp),
                 )
             }
         }
     }
 }
+
+private fun emptyDisplayTrack() = MusicTrack(
+    id = "empty",
+    title = "FeelUOwn",
+    artists = "",
+    album = "",
+    source = "",
+    sourceType = TrackSourceType.LocalMediaStore,
+)
 
 @Composable
 private fun PlayPauseButton(isPlaying: Boolean, onClick: () -> Unit) {

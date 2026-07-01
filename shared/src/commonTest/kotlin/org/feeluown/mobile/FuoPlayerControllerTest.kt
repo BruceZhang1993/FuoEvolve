@@ -469,6 +469,7 @@ class FuoPlayerControllerTest {
                 currentTrack = track,
                 durationMs = payload.durationMs ?: 0,
                 lyrics = payload.lyrics,
+                audioQuality = payload.audioQuality,
             )
         }
 

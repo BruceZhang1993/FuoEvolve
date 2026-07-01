@@ -734,6 +734,7 @@ class FuoPlayerController(
                     queue = queue,
                     queueIndex = queueIndex,
                     lyrics = payload.lyrics,
+                    audioQuality = payload.audioQuality,
                 )
                 message = "${playableTrack.title} - ${playableTrack.artists}"
             }.onFailure {
@@ -767,6 +768,7 @@ class FuoPlayerController(
             source = source,
             coverUrl = coverUrl,
             durationMs = durationMs,
+            audioQuality = null,
         )
     }
 

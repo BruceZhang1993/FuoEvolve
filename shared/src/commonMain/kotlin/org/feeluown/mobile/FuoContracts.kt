@@ -67,6 +67,7 @@ data class PlaybackPayload(
     val coverUrl: String? = null,
     val durationMs: Long? = null,
     val lyrics: String? = null,
+    val audioQuality: String? = null,
 )
 
 enum class PlayerStatus {
@@ -93,6 +94,7 @@ data class PlaybackState(
     val queueIndex: Int = -1,
     val playMode: PlayMode = PlayMode.ListLoop,
     val lyrics: String? = null,
+    val audioQuality: String? = null,
     val errorMessage: String? = null,
 )
 

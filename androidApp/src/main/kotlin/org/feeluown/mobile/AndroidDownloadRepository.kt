@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,7 @@ class AndroidDownloadRepository(
                 publishStates()
             } catch (throwable: Throwable) {
                 target?.let { finishTarget(it, success = false) }
+                Log.e(TAG, "download failed trackId=${track.id} title=${track.title}", throwable)
                 mutableStates.update { it + (track.id to DownloadState.Failed(throwable.message ?: "下载失败")) }
                 throw throwable
             } finally {
@@ -212,18 +214,23 @@ class AndroidDownloadRepository(
     private fun writeLyricsFileIfNeeded(payload: PlaybackPayload, audioTarget: DownloadTarget) {
         val lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: return
         val fileName = "${audioTarget.fileName.substringBeforeLast('.', audioTarget.fileName)}.lrc"
-        val target = createLyricsTarget(fileName)
-        try {
-            val outputStream = if (target.uri.scheme == "file") {
-                FileOutputStream(File(requireNotNull(target.uri.path)))
-            } else {
-                context.contentResolver.openOutputStream(target.uri, "w")
+        runCatching {
+            var target: DownloadTarget? = null
+            try {
+                target = createLyricsTarget(fileName)
+                val outputStream = if (target.uri.scheme == "file") {
+                    FileOutputStream(File(requireNotNull(target.uri.path)))
+                } else {
+                    context.contentResolver.openOutputStream(target.uri, "w")
+                }
+                outputStream?.writer(Charsets.UTF_8)?.use { it.write(lyrics) } ?: error("无法写入歌词文件")
+                finishLyricsTarget(target, success = true)
+            } catch (throwable: Throwable) {
+                target?.let { finishLyricsTarget(it, success = false) }
+                throw throwable
             }
-            outputStream?.writer(Charsets.UTF_8)?.use { it.write(lyrics) } ?: error("无法写入歌词文件")
-            finishLyricsTarget(target, success = true)
-        } catch (throwable: Throwable) {
-            finishLyricsTarget(target, success = false)
-            throw throwable
+        }.onFailure { throwable ->
+            Log.w(TAG, "save lyrics failed fileName=$fileName", throwable)
         }
     }
 
@@ -534,5 +541,6 @@ class AndroidDownloadRepository(
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         private const val COVER_CONNECT_TIMEOUT_MS = 10_000
         private const val COVER_READ_TIMEOUT_MS = 15_000
+        private const val TAG = "FuoDownload"
     }
 }

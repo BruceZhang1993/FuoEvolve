@@ -1335,6 +1335,7 @@ private fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            ProviderSwitchPanel(controller)
             Text(
                 text = "Provider 登录",
                 style = MaterialTheme.typography.titleLarge,
@@ -1377,6 +1378,57 @@ private fun SettingsScreen(
     }
 }
 
+@Composable
+private fun ProviderSwitchPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Provider 开关",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (controller.availableProviders.isEmpty()) {
+                ProviderContentMessage("Provider 正在初始化")
+            } else {
+                controller.availableProviders.forEach { provider ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = provider.providerName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = if (controller.isProviderEnabled(provider.providerId)) "已启用" else "未启用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Checkbox(
+                            checked = controller.isProviderEnabled(provider.providerId),
+                            enabled = !controller.isLoading &&
+                                (controller.isProviderEnabled(provider.providerId) && controller.enabledProviderIds.size > 1 ||
+                                    !controller.isProviderEnabled(provider.providerId)),
+                            onCheckedChange = { controller.onProviderEnabledChange(provider.providerId, it) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProviderLoginPanel(
@@ -1386,6 +1438,15 @@ private fun ProviderLoginPanel(
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
     val authState = controller.authStateFor(provider)
+    val supportedLoginModes = listOf(
+        ProviderLoginMode.WebView,
+        ProviderLoginMode.Cookie,
+        ProviderLoginMode.Headers,
+    ).filter { it in provider.supportedLoginModes }
+    val activeLoginMode = supportedLoginModes
+        .firstOrNull { it == controller.providerLoginMode }
+        ?: supportedLoginModes.firstOrNull()
+        ?: ProviderLoginMode.Cookie
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1418,23 +1479,20 @@ private fun ProviderLoginPanel(
                 }
                 return@Column
             }
-            SingleChoiceSegmentedButtonRow {
-                SegmentedButton(
-                    selected = controller.providerLoginMode == ProviderLoginMode.WebView,
-                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.WebView) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                ) {
-                    Text("WebView")
-                }
-                SegmentedButton(
-                    selected = controller.providerLoginMode == ProviderLoginMode.Cookie,
-                    onClick = { controller.onProviderLoginModeChange(ProviderLoginMode.Cookie) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                ) {
-                    Text("复制 Cookie")
+            if (supportedLoginModes.size > 1) {
+                SingleChoiceSegmentedButtonRow {
+                    supportedLoginModes.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = activeLoginMode == mode,
+                            onClick = { controller.onProviderLoginModeChange(mode) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = supportedLoginModes.size),
+                        ) {
+                            Text(mode.label())
+                        }
+                    }
                 }
             }
-            when (controller.providerLoginMode) {
+            when (activeLoginMode) {
                 ProviderLoginMode.WebView -> {
                     Button(
                         enabled = !controller.isLoading && provider.loginConfig != null,
@@ -1470,9 +1528,43 @@ private fun ProviderLoginPanel(
                         Text(if (controller.isLoading) "登录中" else "登录")
                     }
                 }
+                ProviderLoginMode.Headers -> {
+                    val headerInput = controller.providerHeaderInputFor(provider.providerId)
+                    TextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = headerInput.authorization,
+                        onValueChange = { controller.onProviderHeaderAuthorizationChange(provider.providerId, it) },
+                        placeholder = { Text("Authorization") },
+                        singleLine = true,
+                    )
+                    TextField(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp),
+                        value = headerInput.cookie,
+                        onValueChange = { controller.onProviderHeaderCookieChange(provider.providerId, it) },
+                        placeholder = { Text("Cookie") },
+                        minLines = 4,
+                        maxLines = 8,
+                    )
+                    Button(
+                        enabled = !controller.isLoading,
+                        onClick = { controller.loginProviderWithHeaders(provider.providerId) },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (controller.isLoading) "登录中" else "登录")
+                    }
+                }
             }
         }
     }
+}
+
+private fun ProviderLoginMode.label(): String = when (this) {
+    ProviderLoginMode.WebView -> "WebView"
+    ProviderLoginMode.Cookie -> "复制 Cookie"
+    ProviderLoginMode.Headers -> "Headers"
 }
 
 @Composable

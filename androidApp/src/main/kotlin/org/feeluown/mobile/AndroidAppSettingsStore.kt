@@ -24,6 +24,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             selectedSettingsProviderId = preferences.getString(KEY_SELECTED_SETTINGS_PROVIDER_ID, null),
             providerLoginMode = enumValue(KEY_PROVIDER_LOGIN_MODE, ProviderLoginMode.WebView),
             providerCookieInputs = readCookieInputs(),
+            providerHeaderInputs = readHeaderInputs(),
+            enabledProviderIds = readStringSet(KEY_ENABLED_PROVIDER_IDS).ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS },
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
@@ -51,6 +53,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putNullableString(KEY_SELECTED_SETTINGS_PROVIDER_ID, settings.selectedSettingsProviderId)
                 .putString(KEY_PROVIDER_LOGIN_MODE, settings.providerLoginMode.name)
                 .putString(KEY_PROVIDER_COOKIE_INPUTS, cookieInputsJson(settings.providerCookieInputs))
+                .putString(KEY_PROVIDER_HEADER_INPUTS, headerInputsJson(settings.providerHeaderInputs))
+                .putStringSet(KEY_ENABLED_PROVIDER_IDS, settings.enabledProviderIds)
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
@@ -103,6 +107,43 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         return json.toString()
     }
 
+    private fun readHeaderInputs(): Map<String, ProviderHeaderInput> {
+        val raw = preferences.getString(KEY_PROVIDER_HEADER_INPUTS, null).orEmpty()
+        if (raw.isBlank()) return emptyMap()
+        return runCatching {
+            val json = JSONObject(raw)
+            buildMap {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val providerId = keys.next()
+                    val value = json.optJSONObject(providerId) ?: continue
+                    val input = ProviderHeaderInput(
+                        authorization = value.optString("authorization"),
+                        cookie = value.optString("cookie"),
+                    )
+                    if (providerId.isNotBlank() && (input.authorization.isNotBlank() || input.cookie.isNotBlank())) {
+                        put(providerId, input)
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun headerInputsJson(inputs: Map<String, ProviderHeaderInput>): String {
+        val json = JSONObject()
+        inputs.forEach { (providerId, input) ->
+            if (providerId.isNotBlank() && (input.authorization.isNotBlank() || input.cookie.isNotBlank())) {
+                json.put(
+                    providerId,
+                    JSONObject()
+                        .put("authorization", input.authorization)
+                        .put("cookie", input.cookie),
+                )
+            }
+        }
+        return json.toString()
+    }
+
     private fun readStringSet(key: String): Set<String> {
         return preferences.getStringSet(key, emptySet()).orEmpty().filter { it.isNotBlank() }.toSet()
     }
@@ -122,6 +163,8 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_SELECTED_SETTINGS_PROVIDER_ID = "selected_settings_provider_id"
         private const val KEY_PROVIDER_LOGIN_MODE = "provider_login_mode"
         private const val KEY_PROVIDER_COOKIE_INPUTS = "provider_cookie_inputs"
+        private const val KEY_PROVIDER_HEADER_INPUTS = "provider_header_inputs"
+        private const val KEY_ENABLED_PROVIDER_IDS = "enabled_provider_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"

@@ -162,6 +162,14 @@ class MobileAppContext:
         self.last_message = str(msg)
 
 
+PROVIDER_MODULES = {
+    "netease": "fuo_netease",
+    "qqmusic": "fuo_qqmusic",
+    "bilibili": "fuo_bilibili",
+    "ytmusic": "fuo_ytmusic",
+}
+
+
 class ProviderRegistry:
     def __init__(self, app: MobileAppContext, enabled: List[str]):
         self.app = app
@@ -169,7 +177,8 @@ class ProviderRegistry:
         self.provider_ids: List[str] = []
 
     def load(self):
-        for module_name in self.enabled:
+        for provider_or_module in self.enabled:
+            module_name = PROVIDER_MODULES.get(provider_or_module, provider_or_module)
             module = __import__(module_name)
             if not hasattr(module, "enable"):
                 raise RuntimeError(f"provider module has no enable(app): {module_name}")
@@ -345,6 +354,90 @@ FEATURE_DEFS = {
             "action": "current_user_fav_create_albums_rd",
         },
     ],
+    "bilibili": [
+        {
+            "id": "bilibili_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "bilibili_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+    ],
+    "ytmusic": [
+        {
+            "id": "ytmusic_daily_songs",
+            "title": "每日推荐歌曲",
+            "category": "Recommend",
+            "content_type": "Songs",
+            "requires_login": False,
+            "action": "rec_list_daily_songs",
+        },
+        {
+            "id": "ytmusic_daily_playlists",
+            "title": "推荐歌单",
+            "category": "Recommend",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "rec_list_daily_playlists",
+        },
+        {
+            "id": "ytmusic_toplists",
+            "title": "排行榜",
+            "category": "Music",
+            "content_type": "Playlists",
+            "requires_login": False,
+            "action": "toplist_list",
+        },
+        {
+            "id": "ytmusic_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "ytmusic_favorite_songs",
+            "title": "收藏歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_fav_create_songs_rd",
+        },
+        {
+            "id": "ytmusic_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+        {
+            "id": "ytmusic_favorite_artists",
+            "title": "收藏歌手",
+            "category": "Mine",
+            "content_type": "Artists",
+            "requires_login": True,
+            "action": "current_user_fav_create_artists_rd",
+        },
+        {
+            "id": "ytmusic_favorite_albums",
+            "title": "收藏专辑",
+            "category": "Mine",
+            "content_type": "Albums",
+            "requires_login": True,
+            "action": "current_user_fav_create_albums_rd",
+        },
+    ],
 }
 
 LOGIN_CONFIGS = {
@@ -359,12 +452,23 @@ LOGIN_CONFIGS = {
             ["qqmusic_key", "uin", "qm_keyst"],
         ],
     },
+    "bilibili": {
+        "login_url": "https://www.bilibili.com",
+        "cookie_key_groups": [["SESSDATA", "bili_jct"]],
+    },
+}
+
+LOGIN_MODES = {
+    "netease": ["WebView", "Cookie"],
+    "qqmusic": ["WebView", "Cookie"],
+    "bilibili": ["WebView", "Cookie"],
+    "ytmusic": ["Headers"],
 }
 
 
 class FuoMobileBridge:
     def __init__(self, providers_json: str):
-        providers = json.loads(providers_json or "{}").get("enabled") or ["fuo_netease"]
+        providers = json.loads(providers_json or "{}").get("enabled") or ["netease"]
         library = Library(
             MobileConfig.PROVIDERS_STANDBY,
             MobileConfig.ENABLE_AI_STANDBY_MATCHER,
@@ -429,7 +533,10 @@ class FuoMobileBridge:
         cookies = parse_cookies(cookies_json)
         if not isinstance(cookies, dict) or not cookies:
             raise RuntimeError("cookies must be a non-empty JSON object")
-        if hasattr(provider, "get_user_from_cookies"):
+        if provider_id == "bilibili":
+            provider._api.from_cookiedict(cookies)
+            user = provider.user_info()
+        elif hasattr(provider, "get_user_from_cookies"):
             user = provider.get_user_from_cookies(cookies)
         elif hasattr(provider, "try_get_user_from_cookies"):
             user, err = provider.try_get_user_from_cookies(cookies)
@@ -439,6 +546,27 @@ class FuoMobileBridge:
             raise RuntimeError(f"provider does not support cookies login: {provider_id}")
         provider.auth(user)
         self._save_login(provider_id, user, cookies)
+        return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
+
+    def provider_login_with_headers(self, provider_id: str, authorization: str, cookie: str) -> str:
+        if provider_id != "ytmusic":
+            raise RuntimeError(f"provider does not support header login: {provider_id}")
+        auth = (authorization or "").strip()
+        cookie_value = (cookie or "").strip()
+        if not auth or not cookie_value:
+            raise RuntimeError("authorization and cookie must be non-empty")
+        provider = self._get_provider(provider_id)
+        from fuo_ytmusic.consts import HEADER_FILE
+        from fuo_ytmusic.headerfile import write_headerfile
+
+        write_headerfile(auth, cookie_value, HEADER_FILE)
+        user = provider.try_get_user_with_headerfile()
+        if user is None:
+            raise RuntimeError("get user with ytmusic headers failed")
+        provider.auth(user)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(user)
         return json.dumps(provider_auth_state(provider, user), ensure_ascii=False)
 
     def provider_logout(self, provider_id: str) -> str:
@@ -636,6 +764,10 @@ class FuoMobileBridge:
             from fuo_qqmusic.login import write_cookies
 
             write_cookies(user, cookies)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.login import dump_user_cookies
+
+            dump_user_cookies(cookies)
 
     def _delete_saved_login(self, provider_id: str) -> None:
         if provider_id == "netease":
@@ -648,6 +780,20 @@ class FuoMobileBridge:
 
             if os.path.exists(USER_INFO_FILE):
                 os.remove(USER_INFO_FILE)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.const import PLUGIN_API_COOKIEJAR_FILE, PLUGIN_API_COOKIEDICT_FILE
+
+            for path in (PLUGIN_API_COOKIEJAR_FILE, PLUGIN_API_COOKIEDICT_FILE):
+                if os.path.exists(path):
+                    os.remove(path)
+        elif provider_id == "ytmusic":
+            from fuo_ytmusic.consts import HEADER_FILE
+            from fuo_ytmusic.headerfile import YtdlpCookiefileManager
+
+            cookiefile = YtdlpCookiefileManager(HEADER_FILE).cookiefile_path
+            for path in (HEADER_FILE, cookiefile):
+                if path is not None and os.path.exists(path):
+                    os.remove(path)
 
     def _clear_provider_auth(self, provider_id: str, provider) -> None:
         try:
@@ -663,6 +809,12 @@ class FuoMobileBridge:
             LoginController._api = provider.api
         elif provider_id == "qqmusic":
             provider.api.set_cookies(None)
+        elif provider_id == "bilibili":
+            from fuo_bilibili.api import BilibiliApi
+
+            provider._api = BilibiliApi()
+        elif provider_id == "ytmusic":
+            provider._user = None
         current_user_changed = getattr(provider, "current_user_changed", None)
         if current_user_changed is not None:
             current_user_changed.emit(None)
@@ -689,8 +841,20 @@ class FuoMobileBridge:
                 user, err = provider.try_get_user_from_cookies(cookies)
                 if user is None:
                     bridge_log(f"restore login skipped provider_id={provider_id}: {err}")
+        elif provider_id == "bilibili":
+            from fuo_bilibili.login import load_user_cookies
+
+            cookies = load_user_cookies()
+            if cookies:
+                provider._api.from_cookiedict(cookies)
+                user = provider.user_info()
+        elif provider_id == "ytmusic":
+            user = provider.try_get_user_with_headerfile()
         if user is not None:
             provider.auth(user)
+            current_user_changed = getattr(provider, "current_user_changed", None)
+            if current_user_changed is not None:
+                current_user_changed.emit(user)
             bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
     def _prepare_payload(self, song, audio_select_policy: str, allow_standby: bool) -> Dict[str, Any]:
@@ -824,6 +988,7 @@ def provider_info(provider) -> Dict[str, Any]:
         "provider_id": provider_id,
         "provider_name": provider_name(provider),
         "login_config": LOGIN_CONFIGS.get(provider_id),
+        "login_modes": LOGIN_MODES.get(provider_id, ["WebView", "Cookie"]),
     }
 
 

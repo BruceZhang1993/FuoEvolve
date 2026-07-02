@@ -47,6 +47,8 @@ class FuoPlayerController(
     private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val scope: CoroutineScope,
 ) {
+    var availableProviders by mutableStateOf<List<ProviderInfo>>(emptyList())
+        private set
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
         private set
     var providerFeatures by mutableStateOf<List<ProviderFeature>>(emptyList())
@@ -54,6 +56,10 @@ class FuoPlayerController(
     var providerAuthStates by mutableStateOf<Map<String, ProviderAuthState>>(emptyMap())
         private set
     var providerCookieInputs by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    var providerHeaderInputs by mutableStateOf<Map<String, ProviderHeaderInput>>(emptyMap())
+        private set
+    var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
         private set
     var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
         private set
@@ -170,6 +176,7 @@ class FuoPlayerController(
             updateAudioQualityPolicies()
             resourceCacheRepository.refreshUsage()
             runCatching {
+                providerRepository.updateEnabledProviders(enabledProviderIds)
                 providerRepository.initialize()
                 refreshProviderCatalog()
                 downloadRepository.load()
@@ -220,6 +227,10 @@ class FuoPlayerController(
     }
 
     fun cookieInputFor(providerId: String): String = providerCookieInputs[providerId].orEmpty()
+
+    fun providerHeaderInputFor(providerId: String): ProviderHeaderInput = providerHeaderInputs[providerId] ?: ProviderHeaderInput()
+
+    fun isProviderEnabled(providerId: String): Boolean = providerId in enabledProviderIds
 
     fun selectedSettingsProvider(): ProviderInfo? {
         return providers.firstOrNull { it.providerId == selectedSettingsProviderId } ?: providers.firstOrNull()
@@ -336,9 +347,50 @@ class FuoPlayerController(
         persistSettings()
     }
 
+    fun onProviderHeaderAuthorizationChange(providerId: String, value: String) {
+        val input = providerHeaderInputFor(providerId).copy(authorization = value)
+        providerHeaderInputs = providerHeaderInputs + (providerId to input)
+        persistSettings()
+    }
+
+    fun onProviderHeaderCookieChange(providerId: String, value: String) {
+        val input = providerHeaderInputFor(providerId).copy(cookie = value)
+        providerHeaderInputs = providerHeaderInputs + (providerId to input)
+        persistSettings()
+    }
+
     fun onSettingsProviderChange(providerId: String) {
         selectedSettingsProviderId = providerId
         persistSettings()
+    }
+
+    fun onProviderEnabledChange(providerId: String, enabled: Boolean) {
+        val next = if (enabled) {
+            enabledProviderIds + providerId
+        } else {
+            enabledProviderIds - providerId
+        }
+        if (next.isEmpty()) {
+            message = "至少保留一个 Provider"
+            return
+        }
+        enabledProviderIds = next
+        persistSettings()
+        scope.launch {
+            isLoading = true
+            message = "正在更新 Provider"
+            runCatching {
+                providerRepository.updateEnabledProviders(enabledProviderIds)
+                clearProviderContent()
+                refreshProviderCatalog()
+            }.onSuccess {
+                message = "Provider 已更新"
+                refreshHomeContent(homeSection)
+            }.onFailure {
+                setError(it)
+            }
+            isLoading = false
+        }
     }
 
     fun onProviderLoginModeChange(value: ProviderLoginMode) {
@@ -418,6 +470,38 @@ class FuoPlayerController(
         }
     }
 
+    fun loginProviderWithHeaders(providerId: String) {
+        val input = providerHeaderInputFor(providerId)
+        val authorization = input.authorization.trim()
+        val cookie = input.cookie.trim()
+        val providerName = providerName(providerId)
+        if (authorization.isEmpty() || cookie.isEmpty()) {
+            message = "请输入 $providerName Authorization 和 Cookie"
+            return
+        }
+        scope.launch {
+            isLoading = true
+            message = "正在登录 $providerName"
+            runCatching { providerRepository.loginWithHeaders(providerId, authorization, cookie) }
+                .onSuccess {
+                    providerAuthStates = providerAuthStates + (providerId to it)
+                    persistSettings()
+                    message = if (it.isLoggedIn) {
+                        "${it.providerName} 已登录：${it.userName.orEmpty()}"
+                    } else {
+                        "${it.providerName} 未登录"
+                    }
+                    if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
+                        refreshActiveMineProviderContent()
+                    } else {
+                        refreshHomeContent(homeSection)
+                    }
+                }
+                .onFailure { setError(it) }
+            isLoading = false
+        }
+    }
+
     fun logoutProvider(providerId: String) {
         val providerName = providerName(providerId)
         scope.launch {
@@ -427,6 +511,7 @@ class FuoPlayerController(
                 .onSuccess {
                     providerAuthStates = providerAuthStates + (providerId to it)
                     providerCookieInputs = providerCookieInputs - providerId
+                    providerHeaderInputs = providerHeaderInputs - providerId
                     persistSettings()
                     message = "${it.providerName} 已退出登录"
                     if (homeSection == HomeSection.Mine && mineSection != MineSection.LocalMusic) {
@@ -945,6 +1030,19 @@ class FuoPlayerController(
     }
 
     private suspend fun refreshProviderCatalog() {
+        val loadedAvailableProviders = providerRepository.availableProviders()
+        availableProviders = loadedAvailableProviders
+        val availableProviderIds = loadedAvailableProviders.map { it.providerId }.toSet()
+        if (availableProviderIds.isNotEmpty()) {
+            val normalizedEnabledProviderIds = enabledProviderIds.intersect(availableProviderIds)
+                .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS.intersect(availableProviderIds) }
+                .ifEmpty { setOf(loadedAvailableProviders.first().providerId) }
+            if (normalizedEnabledProviderIds != enabledProviderIds) {
+                enabledProviderIds = normalizedEnabledProviderIds
+                persistSettings()
+                providerRepository.updateEnabledProviders(enabledProviderIds)
+            }
+        }
         val loadedProviders = providerRepository.providers()
         providers = loadedProviders
         val providerIds = loadedProviders.map { it.providerId }.toSet()
@@ -966,6 +1064,20 @@ class FuoPlayerController(
         }
         providerFeatures = providerRepository.features()
         refreshProviderAuthStates()
+    }
+
+    private fun clearProviderContent() {
+        recommendSections = emptyList()
+        musicSections = emptyList()
+        mineSections = emptyList()
+        minePlaylistSections = emptyList()
+        mineFavoritePlaylistSections = emptyList()
+        selectedFeature = null
+        selectedPlaylist = null
+        selectedMediaItem = null
+        selectedFeatureTracks = emptyList()
+        selectedPlaylistTracks = emptyList()
+        selectedMediaItemTracks = emptyList()
     }
 
     private fun refreshAllProviderAuthStates() {
@@ -1176,7 +1288,9 @@ class FuoPlayerController(
     }
 
     private fun providerName(providerId: String): String {
-        return providers.firstOrNull { it.providerId == providerId }?.providerName ?: providerId
+        return providers.firstOrNull { it.providerId == providerId }?.providerName
+            ?: availableProviders.firstOrNull { it.providerId == providerId }?.providerName
+            ?: providerId
     }
 
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
@@ -1199,6 +1313,8 @@ class FuoPlayerController(
         selectedSettingsProviderId = settings.selectedSettingsProviderId
         providerLoginMode = settings.providerLoginMode
         providerCookieInputs = settings.providerCookieInputs
+        providerHeaderInputs = settings.providerHeaderInputs
+        enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
@@ -1218,6 +1334,8 @@ class FuoPlayerController(
             selectedSettingsProviderId = selectedSettingsProviderId,
             providerLoginMode = providerLoginMode,
             providerCookieInputs = providerCookieInputs,
+            providerHeaderInputs = providerHeaderInputs,
+            enabledProviderIds = enabledProviderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,

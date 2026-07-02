@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -92,6 +93,13 @@ class AndroidNativeAudioEngine(
 
                                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                                     updateFromController(connectedController, connectedController.playbackState)
+                                }
+
+                                override fun onPlayerError(error: PlaybackException) {
+                                    mutableState.value = mutableState.value.copy(
+                                        status = PlayerStatus.Error,
+                                        errorMessage = error.message ?: error.errorCodeName,
+                                    )
                                 }
                             })
                             updateFromController(connectedController, connectedController.playbackState)

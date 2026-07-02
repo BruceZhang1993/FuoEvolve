@@ -783,7 +783,7 @@ class FuoMobileBridge:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
         if quality:
             payload["audio_quality"] = quality
-        cover = self.app.library.model_get_cover(song)
+        cover = normalize_image_url(self.app.library.model_get_cover(song))
         if cover:
             payload["cover_url"] = cover
         lyrics = self._get_lyrics(song)
@@ -896,7 +896,7 @@ def song_to_dict(song, library: Library) -> Dict[str, Any]:
         "source": source,
         "provider_name": provider_name(library.get(source)),
         "duration_ms": duration_ms(song),
-        "cover_url": display(song, "pic_url"),
+        "cover_url": normalize_image_url(display(song, "pic_url")),
     }
 
 
@@ -920,7 +920,7 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "title": display(playlist, "name"),
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
-        "cover_url": display(playlist, "cover") or "",
+        "cover_url": normalize_image_url(display(playlist, "cover")),
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
     }
@@ -935,7 +935,7 @@ def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]
         "provider_id": source,
         "provider_name": provider_name(library.get(source)),
         "type": "Artist" if item_type == "artist" else "Album",
-        "cover_url": display(item, "pic_url") or display(item, "cover") or display(item, "cover_url"),
+        "cover_url": normalize_image_url(display(item, "pic_url") or display(item, "cover") or display(item, "cover_url")),
         "description": display(item, "description") or display(item, "artists_name"),
     }
 
@@ -951,7 +951,7 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
         "album": metadata.get("album", ""),
         "source": metadata.get("source", ""),
         "headers": dict(media.http_headers or {}),
-        "cover_url": metadata.get("cover_url", ""),
+        "cover_url": normalize_image_url(metadata.get("cover_url", "")),
         "duration_ms": metadata.get("duration_ms", 0),
         "lyrics": metadata.get("lyrics", ""),
     }
@@ -966,6 +966,13 @@ def display(model, field: str) -> str:
     if isinstance(value, (list, tuple)):
         return " / ".join(str(each) for each in value)
     return str(value or "")
+
+
+def normalize_image_url(url: Optional[str]) -> str:
+    value = str(url or "")
+    if value.startswith("http://qpic.y.qq.com/") or value.startswith("http://y.gtimg.cn/"):
+        return "https://" + value[len("http://"):]
+    return value
 
 
 def display_artists(song) -> str:

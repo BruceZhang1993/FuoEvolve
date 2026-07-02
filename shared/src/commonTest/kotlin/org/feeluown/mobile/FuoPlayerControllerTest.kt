@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -73,6 +74,60 @@ class FuoPlayerControllerTest {
 
             assertEquals("provider:2", engine.lastTrack?.id)
             assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun staleResolveResultDoesNotOverrideLatestNextSelection() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+            providerTrack("provider:3", "Third"),
+        )
+        val payloads = tracks.associate { track ->
+            track.id to CompletableDeferred<PlaybackPayload>()
+        }
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            resolveHandler = { track, _ -> payloads.getValue(track.id).await() },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+            controller.next()
+            advanceUntilIdle()
+
+            payloads.getValue("provider:2").complete(payloadFor(tracks[1]))
+            payloads.getValue("provider:1").complete(payloadFor(tracks[0]))
+            advanceUntilIdle()
+
+            assertEquals(null, engine.lastTrack)
+            assertEquals("provider:3", controller.playbackState.currentTrack?.id)
+            assertEquals(2, controller.playbackState.queueIndex)
+
+            payloads.getValue("provider:3").complete(payloadFor(tracks[2]))
+            advanceUntilIdle()
+
+            assertEquals("provider:3", engine.lastTrack?.id)
+            assertEquals(3, provider.resolveCount)
         } finally {
             controllerScope.cancel()
         }
@@ -807,6 +862,14 @@ class FuoPlayerControllerTest {
         providerName = "网易云音乐",
     )
 
+    private fun payloadFor(track: MusicTrack): PlaybackPayload = PlaybackPayload(
+        url = "https://example.com/${track.id}.mp3",
+        title = track.title,
+        artists = track.artists,
+        album = track.album,
+        source = track.source,
+    )
+
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
@@ -815,6 +878,7 @@ class FuoPlayerControllerTest {
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
         private val resolveFailures: Set<String> = emptySet(),
+        private val resolveHandler: (suspend (MusicTrack, UnavailablePlaybackPolicy) -> PlaybackPayload)? = null,
         initialIsLoggedIn: Boolean = true,
     ) : ProviderMusicRepository {
         private var isLoggedIn = initialIsLoggedIn
@@ -842,7 +906,7 @@ class FuoPlayerControllerTest {
             if (track.id in resolveFailures) {
                 throw RuntimeException("media not found: ${track.id}")
             }
-            return PlaybackPayload(
+            return resolveHandler?.invoke(track, unavailablePolicy) ?: PlaybackPayload(
                 url = "https://example.com/${track.id}.mp3",
                 title = track.title,
                 artists = track.artists,

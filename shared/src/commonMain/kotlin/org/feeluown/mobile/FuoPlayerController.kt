@@ -159,6 +159,7 @@ class FuoPlayerController(
     private var queueFeature: ProviderFeature? = null
     private var appendQueueFeatureTask: Deferred<Int>? = null
     private var lastEndedTrackId: String? = null
+    private var playRequestSerial: Long = 0
 
     init {
         scope.launch {
@@ -991,13 +992,28 @@ class FuoPlayerController(
         sourceFeature: ProviderFeature? = null,
         skippedUnavailableCount: Int = 0,
     ) {
-        scope.launch {
+        val requestSerial = ++playRequestSerial
+        val playbackTrack = track.preferDownloaded()
+        queue = sourceQueue.mapIndexed { itemIndex, item ->
+            if (itemIndex == index) playbackTrack else item
+        }
+        queueIndex = index
+        queueFeature = sourceFeature
+        playbackState = playbackState.copy(
+            status = PlayerStatus.Loading,
+            currentTrack = playbackTrack,
+            queue = queue,
+            queueIndex = queueIndex,
+            positionMs = 0,
+            errorMessage = null,
+        )
+        scope.launch playRequest@{
             isLoading = true
             message = "正在播放：${track.title}"
             runCatching {
-                val playbackTrack = track.preferDownloaded()
                 val payload = playbackTrack.toPayload()
                     ?: providerRepository.resolve(playbackTrack, unavailablePlaybackPolicy)
+                if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
                     coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
                     durationMs = payload.durationMs ?: playbackTrack.durationMs,
@@ -1019,11 +1035,14 @@ class FuoPlayerController(
                 message = "${playableTrack.title} - ${playableTrack.artists}"
                 prefetchFeatureQueueIfNeeded()
             }.onFailure {
+                if (requestSerial != playRequestSerial) return@playRequest
                 if (!skipUnavailableTrack(track, sourceQueue, index, sourceFeature, skippedUnavailableCount, it)) {
                     setError(it)
                 }
             }
-            isLoading = false
+            if (requestSerial == playRequestSerial) {
+                isLoading = false
+            }
         }
     }
 

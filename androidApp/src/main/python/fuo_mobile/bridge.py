@@ -977,9 +977,36 @@ class FuoMobileBridge:
     def _select_media(self, song, audio_select_policy: str):
         provider = self.app.library.get(getattr(song, "source", ""))
         if provider is not None and isinstance(provider, SupportsSongMultiQuality):
-            media, quality = provider.song_select_media(song, audio_select_policy)
+            try:
+                media, quality = provider.song_select_media(song, audio_select_policy)
+            except MediaNotFound:
+                refreshed_song = self._refresh_song_for_media_retry(song, provider)
+                if refreshed_song is None:
+                    raise
+                media, quality = provider.song_select_media(refreshed_song, audio_select_policy)
+                song = refreshed_song
+            self._tracks[f"{getattr(song, 'source', '')}:{getattr(song, 'identifier', '')}"] = song
             return media, getattr(quality, "value", str(quality)).upper()
         return self.app.library.song_prepare_media(song, audio_select_policy), ""
+
+    def _refresh_song_for_media_retry(self, song, provider):
+        source = getattr(song, "source", "")
+        identifier = getattr(song, "identifier", "")
+        if source != "netease" or not identifier:
+            return None
+        try:
+            song.cache_set("q_media_mapping", None, ttl=-1)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"netease media cache clear failed track={song_log_label(song)} error={exc}")
+        refreshed_song = None
+        try:
+            refreshed_song = provider.song_get(identifier)
+            refreshed_song.cache_set("q_media_mapping", None, ttl=-1)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"netease song refresh failed track={song_log_label(song)} error={exc}")
+        retry_song = refreshed_song or song
+        bridge_log(f"netease media retry track={song_log_label(retry_song)}")
+        return retry_song
 
     def _payload_from_media(self, song, media: Media, quality: str) -> Dict[str, Any]:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))

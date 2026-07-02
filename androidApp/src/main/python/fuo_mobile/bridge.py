@@ -56,6 +56,14 @@ def _patch_pydantic_v1() -> None:
 
         pydantic.model_validator = model_validator
 
+    if not hasattr(pydantic, "field_validator"):
+        from pydantic import validator
+
+        def field_validator(*fields, mode="after", **kwargs):
+            return validator(*fields, pre=(mode == "before"), allow_reuse=True)
+
+        pydantic.field_validator = field_validator
+
     if not hasattr(pydantic, "model_serializer"):
         def model_serializer(*args, **kwargs):
             def decorator(func):
@@ -183,7 +191,10 @@ class ProviderRegistry:
             if not hasattr(module, "enable"):
                 raise RuntimeError(f"provider module has no enable(app): {module_name}")
             if hasattr(module, "init_config"):
-                module.init_config(Config(module_name))
+                config_name = self._config_name(provider_or_module, module_name, module)
+                provider_config = Config(config_name)
+                module.init_config(provider_config)
+                setattr(self.app.config, config_name, provider_config)
             before = {provider.identifier for provider in self.app.library.list()}
             self._enable_without_auto_login(module)
             provider = getattr(module, "provider", None)
@@ -193,6 +204,16 @@ class ProviderRegistry:
             else:
                 after = [provider.identifier for provider in self.app.library.list()]
                 self.provider_ids.extend(provider_id for provider_id in after if provider_id not in before)
+
+    def _config_name(self, provider_or_module: str, module_name: str, module) -> str:
+        if provider_or_module in PROVIDER_MODULES:
+            return provider_or_module
+        provider_id = getattr(module, "__identifier__", "")
+        if provider_id:
+            return provider_id
+        if module_name.startswith("fuo_"):
+            return module_name.removeprefix("fuo_")
+        return module_name
 
     def _enable_without_auto_login(self, module):
         import feeluown.library.library as library_module

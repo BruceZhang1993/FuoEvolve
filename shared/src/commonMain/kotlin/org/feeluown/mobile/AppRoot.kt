@@ -1316,12 +1316,27 @@ private fun SettingsScreen(
     onOpenProviderWebLogin: (ProviderInfo) -> Unit,
     onLogoutProvider: (ProviderInfo) -> Unit,
 ) {
+    var loginProviderId by remember { mutableStateOf<String?>(null) }
+    val loginProvider = controller.orderedProviders().firstOrNull { it.providerId == loginProviderId }
+    LaunchedEffect(loginProviderId, controller.providers) {
+        if (loginProviderId != null && loginProvider == null) {
+            loginProviderId = null
+        }
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("设置") },
+                title = { Text(loginProvider?.providerName ?: "设置") },
                 navigationIcon = {
-                    IconButton(onClick = controller::closeSettings) {
+                    IconButton(
+                        onClick = {
+                            if (loginProvider != null) {
+                                loginProviderId = null
+                            } else {
+                                controller.closeSettings()
+                            }
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -1336,32 +1351,35 @@ private fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            ProviderSwitchPanel(controller)
-            if (controller.providers.isEmpty()) {
-                ProviderContentMessage("音源正在初始化")
+            if (loginProvider != null) {
+                ProviderLoginPanel(
+                    controller = controller,
+                    provider = loginProvider,
+                    onOpenProviderWebLogin = onOpenProviderWebLogin,
+                    onLogoutProvider = onLogoutProvider,
+                )
             } else {
-                controller.orderedProviders().forEach { provider ->
-                    ProviderLoginPanel(
-                        controller = controller,
-                        provider = provider,
-                        onOpenProviderWebLogin = onOpenProviderWebLogin,
-                        onLogoutProvider = onLogoutProvider,
-                    )
+                ProviderSwitchPanel(
+                    controller = controller,
+                    onOpenProviderLogin = { provider -> loginProviderId = provider.providerId },
+                )
+                AudioQualitySettingsPanel(controller)
+                PlaybackPolicySettingsPanel(controller)
+                LocalMusicScanSettingsPanel(controller)
+                CacheSettingsPanel(controller)
+                if (controller.isDebugLogViewerAvailable) {
+                    DebugSettingsPanel(controller)
                 }
-            }
-            AudioQualitySettingsPanel(controller)
-            PlaybackPolicySettingsPanel(controller)
-            LocalMusicScanSettingsPanel(controller)
-            CacheSettingsPanel(controller)
-            if (controller.isDebugLogViewerAvailable) {
-                DebugSettingsPanel(controller)
             }
         }
     }
 }
 
 @Composable
-private fun ProviderSwitchPanel(controller: FuoPlayerController) {
+private fun ProviderSwitchPanel(
+    controller: FuoPlayerController,
+    onOpenProviderLogin: (ProviderInfo) -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1381,6 +1399,8 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
             } else {
                 val orderedProviders = controller.orderedAvailableProviders()
                 orderedProviders.forEachIndexed { index, provider ->
+                    val isEnabled = controller.isProviderEnabled(provider.providerId)
+                    val authState = controller.authStateFor(provider)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1393,7 +1413,7 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                text = if (controller.isProviderEnabled(provider.providerId)) "已启用" else "未启用",
+                                text = providerStatusText(isEnabled, authState),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1411,12 +1431,17 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
                             ) {
                                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移${provider.providerName}")
                             }
+                            TextButton(
+                                enabled = !controller.isLoading && isEnabled,
+                                onClick = { onOpenProviderLogin(provider) },
+                            ) {
+                                Text(if (authState.isLoggedIn) "管理" else "登录")
+                            }
                         }
                         Checkbox(
-                            checked = controller.isProviderEnabled(provider.providerId),
+                            checked = isEnabled,
                             enabled = !controller.isLoading &&
-                                (controller.isProviderEnabled(provider.providerId) && controller.enabledProviderIds.size > 1 ||
-                                    !controller.isProviderEnabled(provider.providerId)),
+                                (isEnabled && controller.enabledProviderIds.size > 1 || !isEnabled),
                             onCheckedChange = { controller.onProviderEnabledChange(provider.providerId, it) },
                         )
                     }
@@ -1424,6 +1449,12 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
             }
         }
     }
+}
+
+private fun providerStatusText(isEnabled: Boolean, authState: ProviderAuthState): String {
+    val enabledText = if (isEnabled) "已启用" else "未启用"
+    val loginText = if (isEnabled && authState.isLoggedIn) "已登录" else "未登录"
+    return "$enabledText · $loginText"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

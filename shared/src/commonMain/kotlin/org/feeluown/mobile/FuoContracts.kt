@@ -77,6 +77,7 @@ data class MusicTrack(
     val coverUrl: String? = null,
     val durationMs: Long? = null,
     val localUri: String? = null,
+    val lyrics: String? = null,
     val providerId: String? = null,
     val providerName: String? = null,
 )

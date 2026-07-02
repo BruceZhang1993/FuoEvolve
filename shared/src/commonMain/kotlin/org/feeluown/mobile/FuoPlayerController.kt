@@ -1146,6 +1146,7 @@ class FuoPlayerController(
             source = source,
             coverUrl = coverUrl,
             durationMs = durationMs,
+            lyrics = lyrics,
             audioQuality = null,
         )
     }

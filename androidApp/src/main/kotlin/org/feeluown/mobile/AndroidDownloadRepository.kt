@@ -58,6 +58,7 @@ class AndroidDownloadRepository(
                 writeId3TagIfNeeded(tempFile, extension, track, payload)
                 target = createTarget(track, payload, extension)
                 val bytes = copyToTarget(track.id, tempFile, target.uri)
+                writeLyricsFileIfNeeded(payload, target)
                 val finalUri = finishTarget(target, success = true)
                 val record = DownloadRecord(
                     trackId = track.id,
@@ -206,6 +207,72 @@ class AndroidDownloadRepository(
             file.delete()
         }
         return target.uri
+    }
+
+    private fun writeLyricsFileIfNeeded(payload: PlaybackPayload, audioTarget: DownloadTarget) {
+        val lyrics = payload.lyrics?.takeIf { it.isNotBlank() } ?: return
+        val fileName = "${audioTarget.fileName.substringBeforeLast('.', audioTarget.fileName)}.lrc"
+        val target = createLyricsTarget(fileName)
+        try {
+            val outputStream = if (target.uri.scheme == "file") {
+                FileOutputStream(File(requireNotNull(target.uri.path)))
+            } else {
+                context.contentResolver.openOutputStream(target.uri, "w")
+            }
+            outputStream?.writer(Charsets.UTF_8)?.use { it.write(lyrics) } ?: error("无法写入歌词文件")
+            finishLyricsTarget(target, success = true)
+        } catch (throwable: Throwable) {
+            finishLyricsTarget(target, success = false)
+            throw throwable
+        }
+    }
+
+    private fun createLyricsTarget(fileName: String): DownloadTarget {
+        val mimeType = "text/plain"
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/FeelUOwn")
+            }
+            val uri = requireNotNull(
+                context.contentResolver.insert(MediaStore.Files.getContentUri("external"), values)
+            ) { "无法创建歌词文件" }
+            DownloadTarget(uri, fileName, mimeType)
+        } else {
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                "FeelUOwn",
+            )
+            if (!dir.exists()) dir.mkdirs()
+            DownloadTarget(Uri.fromFile(File(dir, fileName)), fileName, mimeType)
+        }
+    }
+
+    private fun finishLyricsTarget(target: DownloadTarget, success: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (success) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                context.contentResolver.update(target.uri, values, null, null)
+            } else {
+                context.contentResolver.delete(target.uri, null, null)
+            }
+            return
+        }
+        val file = File(requireNotNull(target.uri.path))
+        if (success) {
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(file.absolutePath),
+                arrayOf(target.mimeType),
+                null,
+            )
+        } else {
+            file.delete()
+        }
     }
 
     private fun saveRecords() {

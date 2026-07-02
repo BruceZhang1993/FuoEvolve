@@ -7,6 +7,8 @@ import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.Locale
 
 class AndroidLocalMusicRepository(
     private val context: Context,
@@ -39,6 +41,7 @@ class AndroidLocalMusicRepository(
     override suspend fun scan(): List<MusicTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<MusicTrack>()
         val settings = scanSettings
+        val lyrics = queryLyrics()
         queryAudioRows { row ->
             val directory = directoryInfo(row.relativePath)
             if (directory.id in settings.excludedDirectoryIds) return@queryAudioRows
@@ -67,6 +70,7 @@ class AndroidLocalMusicRepository(
                 coverUrl = localCoverUri(row.uri, row.albumId),
                 durationMs = durationMs,
                 localUri = row.uri.toString(),
+                lyrics = row.lyrics(lyrics),
             )
         }
         cachedTracks = tracks
@@ -93,9 +97,13 @@ class AndroidLocalMusicRepository(
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DISPLAY_NAME,
         ).apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(MediaStore.Audio.Media.RELATIVE_PATH)
+            } else {
+                @Suppress("DEPRECATION")
+                add(MediaStore.Audio.Media.DATA)
             }
         }.toTypedArray()
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -111,8 +119,15 @@ class AndroidLocalMusicRepository(
             val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
             val relativePathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 cursor.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH)
+            } else {
+                -1
+            }
+            val dataColumn = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                @Suppress("DEPRECATION")
+                cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
             } else {
                 -1
             }
@@ -127,8 +142,14 @@ class AndroidLocalMusicRepository(
                         album = cursor.getString(albumColumn).orEmpty(),
                         albumId = cursor.getLong(albumIdColumn),
                         durationMs = cursor.getLong(durationColumn),
+                        displayName = cursor.getString(displayNameColumn).orEmpty(),
                         relativePath = if (relativePathColumn >= 0) {
                             cursor.getString(relativePathColumn).orEmpty()
+                        } else {
+                            ""
+                        },
+                        filePath = if (dataColumn >= 0) {
+                            cursor.getString(dataColumn).orEmpty()
                         } else {
                             ""
                         },
@@ -136,6 +157,43 @@ class AndroidLocalMusicRepository(
                 )
             }
         }
+    }
+
+    private fun queryLyrics(): Map<String, String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyMap()
+        val collection = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+        )
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        val result = linkedMapOf<String, String>()
+        try {
+            context.contentResolver.query(collection, projection, selection, arrayOf("%.lrc"), null)
+        } catch (_: SecurityException) {
+            null
+        }?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+            val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val relativePathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            while (cursor.moveToNext()) {
+                val displayName = cursor.getString(displayNameColumn).orEmpty()
+                if (!displayName.endsWith(".lrc", ignoreCase = true)) continue
+                val relativePath = cursor.getString(relativePathColumn).orEmpty()
+                val key = lyricKey(relativePath, displayName) ?: continue
+                val uri = ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
+                val text = readText(uri) ?: continue
+                result[key] = text
+            }
+        }
+        return result
+    }
+
+    private fun readText(uri: Uri): String? {
+        return runCatching {
+            context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
     private fun directoryInfo(relativePath: String): LocalMusicDirectory {
@@ -161,8 +219,29 @@ private data class AudioRow(
     val album: String,
     val albumId: Long,
     val durationMs: Long,
+    val displayName: String,
     val relativePath: String,
+    val filePath: String,
 )
+
+private fun AudioRow.lyrics(index: Map<String, String>): String? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        val audioFile = filePath.takeIf { it.isNotBlank() }?.let(::File) ?: return null
+        val lyricFile = audioFile.resolveSibling("${audioFile.nameWithoutExtension}.lrc")
+        return lyricFile.takeIf { it.isFile }?.runCatchingReadText()
+    }
+    return lyricKey(relativePath, displayName)?.let(index::get)
+}
+
+private fun lyricKey(relativePath: String, fileName: String): String? {
+    val baseName = fileName.substringBeforeLast('.', "").ifBlank { return null }
+    val directory = relativePath.trim('/').lowercase(Locale.ROOT)
+    return "$directory/${baseName.lowercase(Locale.ROOT)}"
+}
+
+private fun File.runCatchingReadText(): String? {
+    return runCatching { readText() }.getOrNull()?.takeIf { it.isNotBlank() }
+}
 
 private fun albumArtUri(albumId: Long): String? {
     if (albumId <= 0) return null

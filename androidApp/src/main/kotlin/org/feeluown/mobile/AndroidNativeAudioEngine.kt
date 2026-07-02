@@ -193,6 +193,7 @@ class AndroidNativeAudioEngine(
             sourceType = sourceType,
             coverUrl = metadata.artworkUri?.toString(),
             localUri = mediaMetadata.extras?.getString("local_uri")?.takeIf { it.isNotBlank() },
+            lyrics = mediaMetadata.extras?.getString("lyrics")?.takeIf { it.isNotBlank() },
             providerId = mediaMetadata.extras?.getString("provider_id")?.takeIf { it.isNotBlank() },
             providerName = mediaMetadata.extras?.getString("provider_name")?.takeIf { it.isNotBlank() },
         )

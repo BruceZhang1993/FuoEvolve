@@ -42,6 +42,7 @@ class AndroidLocalMusicRepository(
         val tracks = mutableListOf<MusicTrack>()
         val settings = scanSettings
         val lyrics = queryLyrics()
+        val appLyrics = queryAppLyrics()
         queryAudioRows { row ->
             val directory = directoryInfo(row.relativePath)
             if (directory.id in settings.excludedDirectoryIds) return@queryAudioRows
@@ -70,7 +71,7 @@ class AndroidLocalMusicRepository(
                 coverUrl = localCoverUri(row.uri, row.albumId),
                 durationMs = durationMs,
                 localUri = row.uri.toString(),
-                lyrics = row.lyrics(lyrics),
+                lyrics = row.lyrics(lyrics, appLyrics),
             )
         }
         cachedTracks = tracks
@@ -190,6 +191,20 @@ class AndroidLocalMusicRepository(
         return result
     }
 
+    private fun queryAppLyrics(): Map<String, String> {
+        val directory = File(context.filesDir, LYRICS_FOLDER)
+        if (!directory.isDirectory) return emptyMap()
+        val result = linkedMapOf<String, String>()
+        directory.listFiles { file ->
+            file.isFile && file.name.endsWith(".lrc", ignoreCase = true)
+        }?.forEach { file ->
+            val key = lyricBaseName(file.name)?.lowercase(Locale.ROOT) ?: return@forEach
+            val text = file.runCatchingReadText() ?: return@forEach
+            result[key] = text
+        }
+        return result
+    }
+
     private fun readText(uri: Uri): String? {
         return runCatching {
             context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
@@ -208,6 +223,7 @@ class AndroidLocalMusicRepository(
 
     private companion object {
         private const val FEELUOWN_FOLDER = "FeelUOwn"
+        private const val LYRICS_FOLDER = "lyrics"
         private const val OTHER_DIRECTORY_ID = "__other__"
     }
 }
@@ -224,19 +240,31 @@ private data class AudioRow(
     val filePath: String,
 )
 
-private fun AudioRow.lyrics(index: Map<String, String>): String? {
+private fun AudioRow.lyrics(folderLyrics: Map<String, String>, appLyrics: Map<String, String>): String? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-        val audioFile = filePath.takeIf { it.isNotBlank() }?.let(::File) ?: return null
-        val lyricFile = audioFile.resolveSibling("${audioFile.nameWithoutExtension}.lrc")
-        return lyricFile.takeIf { it.isFile }?.runCatchingReadText()
+        val audioFile = filePath.takeIf { it.isNotBlank() }?.let(::File)
+        val folderLyric = audioFile
+            ?.resolveSibling("${audioFile.nameWithoutExtension}.lrc")
+            ?.takeIf { it.isFile }
+            ?.runCatchingReadText()
+        if (folderLyric != null) return folderLyric
+        val baseName = audioFile?.nameWithoutExtension ?: lyricBaseName(displayName) ?: return null
+        return appLyrics[baseName.lowercase(Locale.ROOT)]
     }
-    return lyricKey(relativePath, displayName)?.let(index::get)
+    val folderLyric = lyricKey(relativePath, displayName)?.let(folderLyrics::get)
+    if (folderLyric != null) return folderLyric
+    val baseName = lyricBaseName(displayName)?.lowercase(Locale.ROOT) ?: return null
+    return appLyrics[baseName]
 }
 
 private fun lyricKey(relativePath: String, fileName: String): String? {
-    val baseName = fileName.substringBeforeLast('.', "").ifBlank { return null }
+    val baseName = lyricBaseName(fileName) ?: return null
     val directory = relativePath.trim('/').lowercase(Locale.ROOT)
     return "$directory/${baseName.lowercase(Locale.ROOT)}"
+}
+
+private fun lyricBaseName(fileName: String): String? {
+    return fileName.substringBeforeLast('.', "").ifBlank { null }
 }
 
 private fun File.runCatchingReadText(): String? {

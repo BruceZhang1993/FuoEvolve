@@ -61,6 +61,8 @@ class FuoPlayerController(
         private set
     var enabledProviderIds by mutableStateOf(DEFAULT_ENABLED_PROVIDER_IDS)
         private set
+    var providerOrderIds by mutableStateOf(DEFAULT_PROVIDER_ORDER_IDS)
+        private set
     var recommendSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
         private set
     var musicSections by mutableStateOf<List<ProviderContentSection>>(emptyList())
@@ -232,6 +234,10 @@ class FuoPlayerController(
 
     fun isProviderEnabled(providerId: String): Boolean = providerId in enabledProviderIds
 
+    fun orderedAvailableProviders(): List<ProviderInfo> = availableProviders.sortedProvidersByOrder()
+
+    fun orderedProviders(): List<ProviderInfo> = providers.sortedProvidersByOrder()
+
     fun selectedSettingsProvider(): ProviderInfo? {
         return providers.firstOrNull { it.providerId == selectedSettingsProviderId } ?: providers.firstOrNull()
     }
@@ -371,26 +377,42 @@ class FuoPlayerController(
             enabledProviderIds - providerId
         }
         if (next.isEmpty()) {
-            message = "至少保留一个 Provider"
+            message = "至少保留一个音源"
             return
         }
         enabledProviderIds = next
         persistSettings()
         scope.launch {
             isLoading = true
-            message = "正在更新 Provider"
+            message = "正在更新音源"
             runCatching {
                 providerRepository.updateEnabledProviders(enabledProviderIds)
                 clearProviderContent()
                 refreshProviderCatalog()
             }.onSuccess {
-                message = "Provider 已更新"
+                message = "音源已更新"
                 refreshHomeContent(homeSection)
             }.onFailure {
                 setError(it)
             }
             isLoading = false
         }
+    }
+
+    fun moveProvider(providerId: String, offset: Int) {
+        val availableIds = availableProviders.map { it.providerId }.toSet()
+        val orderedIds = normalizedProviderOrder(availableIds).toMutableList()
+        val index = orderedIds.indexOf(providerId)
+        val targetIndex = (index + offset).coerceIn(0, orderedIds.lastIndex)
+        if (index < 0 || index == targetIndex) return
+        val moved = orderedIds.removeAt(index)
+        orderedIds.add(targetIndex, moved)
+        providerOrderIds = orderedIds
+        availableProviders = availableProviders.sortedProvidersByOrder()
+        providers = providers.sortedProvidersByOrder()
+        providerFeatures = providerFeatures.sortedFeaturesByOrder()
+        reorderProviderContent()
+        persistSettings()
     }
 
     fun onProviderLoginModeChange(value: ProviderLoginMode) {
@@ -660,7 +682,7 @@ class FuoPlayerController(
                             runCatching { providerRepository.loadFeature(feature) }
                                 .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                         }
-                    }
+                    }.sortedSectionsByOrder()
                 }
             }.onSuccess {
                 if (section == HomeSection.Recommend) {
@@ -722,7 +744,7 @@ class FuoPlayerController(
                     runCatching { providerRepository.loadFeature(feature) }
                         .getOrElse { ProviderContentSection(feature, errorMessage = it.message ?: "加载失败") }
                 }
-            }
+            }.sortedSectionsByOrder()
         }
     }
 
@@ -1031,8 +1053,13 @@ class FuoPlayerController(
 
     private suspend fun refreshProviderCatalog() {
         val loadedAvailableProviders = providerRepository.availableProviders()
-        availableProviders = loadedAvailableProviders
         val availableProviderIds = loadedAvailableProviders.map { it.providerId }.toSet()
+        val normalizedProviderOrderIds = normalizedProviderOrder(availableProviderIds)
+        if (normalizedProviderOrderIds != providerOrderIds) {
+            providerOrderIds = normalizedProviderOrderIds
+            persistSettings()
+        }
+        availableProviders = loadedAvailableProviders.sortedProvidersByOrder()
         if (availableProviderIds.isNotEmpty()) {
             val normalizedEnabledProviderIds = enabledProviderIds.intersect(availableProviderIds)
                 .ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS.intersect(availableProviderIds) }
@@ -1043,7 +1070,7 @@ class FuoPlayerController(
                 providerRepository.updateEnabledProviders(enabledProviderIds)
             }
         }
-        val loadedProviders = providerRepository.providers()
+        val loadedProviders = providerRepository.providers().sortedProvidersByOrder()
         providers = loadedProviders
         val providerIds = loadedProviders.map { it.providerId }.toSet()
         if (selectedSettingsProviderId !in providerIds) {
@@ -1062,7 +1089,7 @@ class FuoPlayerController(
                 isLoggedIn = false,
             ))
         }
-        providerFeatures = providerRepository.features()
+        providerFeatures = providerRepository.features().sortedFeaturesByOrder()
         refreshProviderAuthStates()
     }
 
@@ -1078,6 +1105,14 @@ class FuoPlayerController(
         selectedFeatureTracks = emptyList()
         selectedPlaylistTracks = emptyList()
         selectedMediaItemTracks = emptyList()
+    }
+
+    private fun reorderProviderContent() {
+        recommendSections = recommendSections.sortedSectionsByOrder()
+        musicSections = musicSections.sortedSectionsByOrder()
+        mineSections = mineSections.sortedSectionsByOrder()
+        minePlaylistSections = minePlaylistSections.sortedSectionsByOrder()
+        mineFavoritePlaylistSections = mineFavoritePlaylistSections.sortedSectionsByOrder()
     }
 
     private fun refreshAllProviderAuthStates() {
@@ -1293,6 +1328,28 @@ class FuoPlayerController(
             ?: providerId
     }
 
+    private fun normalizedProviderOrder(availableProviderIds: Set<String>): List<String> {
+        val orderedIds = (providerOrderIds + DEFAULT_PROVIDER_ORDER_IDS + availableProviderIds)
+            .filter { it in availableProviderIds }
+            .distinct()
+        return orderedIds.ifEmpty { availableProviderIds.toList() }
+    }
+
+    private fun providerOrderIndex(providerId: String): Int {
+        val normalizedOrder = (providerOrderIds + DEFAULT_PROVIDER_ORDER_IDS).distinct()
+        val index = normalizedOrder.indexOf(providerId)
+        return if (index >= 0) index else Int.MAX_VALUE
+    }
+
+    private fun List<ProviderInfo>.sortedProvidersByOrder(): List<ProviderInfo> =
+        sortedWith(compareBy<ProviderInfo> { providerOrderIndex(it.providerId) }.thenBy { it.providerName })
+
+    private fun List<ProviderFeature>.sortedFeaturesByOrder(): List<ProviderFeature> =
+        sortedWith(compareBy<ProviderFeature> { providerOrderIndex(it.providerId) }.thenBy { it.id })
+
+    private fun List<ProviderContentSection>.sortedSectionsByOrder(): List<ProviderContentSection> =
+        sortedWith(compareBy<ProviderContentSection> { providerOrderIndex(it.feature.providerId) }.thenBy { it.feature.id })
+
     private fun ProviderFeature.isDeferredHomeFeature(): Boolean {
         return category == ProviderFeatureCategory.Recommend &&
             (id.endsWith("_daily_songs") || isDynamicQueueFeature())
@@ -1315,6 +1372,7 @@ class FuoPlayerController(
         providerCookieInputs = settings.providerCookieInputs
         providerHeaderInputs = settings.providerHeaderInputs
         enabledProviderIds = settings.enabledProviderIds.ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS }
+        providerOrderIds = settings.providerOrderIds.ifEmpty { DEFAULT_PROVIDER_ORDER_IDS }
         audioCacheLimitMb = settings.audioCacheLimitMb
         imageCacheLimitMb = settings.imageCacheLimitMb
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
@@ -1336,6 +1394,7 @@ class FuoPlayerController(
             providerCookieInputs = providerCookieInputs,
             providerHeaderInputs = providerHeaderInputs,
             enabledProviderIds = enabledProviderIds,
+            providerOrderIds = providerOrderIds,
             audioCacheLimitMb = audioCacheLimitMb,
             imageCacheLimitMb = imageCacheLimitMb,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,

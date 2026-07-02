@@ -716,6 +716,7 @@ class FuoPlayerControllerTest {
                     ),
                 ),
                 enabledProviderIds = setOf("netease", "ytmusic"),
+                providerOrderIds = listOf("ytmusic", "netease", "qqmusic", "bilibili"),
                 audioCacheLimitMb = 256,
                 imageCacheLimitMb = 64,
                 wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
@@ -751,6 +752,7 @@ class FuoPlayerControllerTest {
             assertEquals(ProviderLoginMode.Cookie, controller.providerLoginMode)
             assertEquals("""{"MUSIC_U":"saved"}""", controller.cookieInputFor("netease"))
             assertEquals(setOf("netease", "ytmusic"), controller.enabledProviderIds)
+            assertEquals(listOf("ytmusic", "netease"), controller.providers.map { it.providerId })
             assertEquals(
                 ProviderHeaderInput("SAPISIDHASH saved", "SID=saved"),
                 controller.providerHeaderInputFor("ytmusic"),
@@ -785,6 +787,7 @@ class FuoPlayerControllerTest {
                 store.saved.providerHeaderInputs["ytmusic"],
             )
             assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
+            assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
             assertEquals(MineSection.Favorites, store.saved.mineSection)
             assertEquals(emptySet(), store.saved.excludedLocalMusicDirectoryIds)
             assertEquals(60, store.saved.localMusicMinDurationSeconds)
@@ -832,6 +835,12 @@ class FuoPlayerControllerTest {
             assertEquals(setOf("netease", "ytmusic"), store.saved.enabledProviderIds)
             assertEquals(setOf("netease", "ytmusic"), provider.lastEnabledProviderIds)
 
+            controller.moveProvider("ytmusic", -3)
+            advanceUntilIdle()
+
+            assertEquals(listOf("ytmusic", "netease"), controller.providers.map { it.providerId })
+            assertEquals(listOf("ytmusic", "netease", "qqmusic", "bilibili"), store.saved.providerOrderIds)
+
             controller.onSearchProviderChange("ytmusic")
             controller.onProviderEnabledChange("ytmusic", enabled = false)
             advanceUntilIdle()
@@ -840,6 +849,58 @@ class FuoPlayerControllerTest {
             assertEquals(listOf("netease"), controller.providers.map { it.providerId })
             assertEquals(SearchScope.All, controller.searchScope)
             assertEquals(null, controller.selectedSearchProviderId)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun providerSectionsFollowConfiguredOrder() = runTest {
+        val neteaseFeature = ProviderFeature(
+            id = "netease_recommend",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "网易推荐",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val ytmusicFeature = ProviderFeature(
+            id = "ytmusic_recommend",
+            providerId = "ytmusic",
+            providerName = "YouTube Music",
+            title = "YT 推荐",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = false,
+        )
+        val store = FakeSettingsStore(
+            AppSettings(
+                enabledProviderIds = setOf("netease", "ytmusic"),
+                providerOrderIds = listOf("ytmusic", "netease", "qqmusic", "bilibili"),
+            ),
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(neteaseFeature, ytmusicFeature),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                settingsStore = store,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf("ytmusic_recommend", "netease_recommend"),
+                controller.recommendSections.map { it.feature.id },
+            )
         } finally {
             controllerScope.cancel()
         }

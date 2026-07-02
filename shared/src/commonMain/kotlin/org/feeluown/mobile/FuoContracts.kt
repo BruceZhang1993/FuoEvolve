@@ -45,6 +45,7 @@ data class AppSettings(
     val providerCookieInputs: Map<String, String> = emptyMap(),
     val providerHeaderInputs: Map<String, ProviderHeaderInput> = emptyMap(),
     val enabledProviderIds: Set<String> = DEFAULT_ENABLED_PROVIDER_IDS,
+    val providerOrderIds: List<String> = DEFAULT_PROVIDER_ORDER_IDS,
     val audioCacheLimitMb: Int = DEFAULT_AUDIO_CACHE_LIMIT_MB,
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
@@ -61,6 +62,7 @@ const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
 const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
 val DEFAULT_ENABLED_PROVIDER_IDS = setOf("netease")
+val DEFAULT_PROVIDER_ORDER_IDS = listOf("netease", "qqmusic", "bilibili", "ytmusic")
 val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
 val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace

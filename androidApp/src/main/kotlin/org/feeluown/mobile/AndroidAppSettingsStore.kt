@@ -3,6 +3,7 @@ package org.feeluown.mobile
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
@@ -26,6 +27,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
             providerCookieInputs = readCookieInputs(),
             providerHeaderInputs = readHeaderInputs(),
             enabledProviderIds = readStringSet(KEY_ENABLED_PROVIDER_IDS).ifEmpty { DEFAULT_ENABLED_PROVIDER_IDS },
+            providerOrderIds = readStringList(KEY_PROVIDER_ORDER_IDS).ifEmpty { DEFAULT_PROVIDER_ORDER_IDS },
             audioCacheLimitMb = preferences.getInt(KEY_AUDIO_CACHE_LIMIT_MB, DEFAULT_AUDIO_CACHE_LIMIT_MB),
             imageCacheLimitMb = preferences.getInt(KEY_IMAGE_CACHE_LIMIT_MB, DEFAULT_IMAGE_CACHE_LIMIT_MB),
             wifiAudioQualityPolicy = enumValue(KEY_WIFI_AUDIO_QUALITY_POLICY, DEFAULT_WIFI_AUDIO_QUALITY_POLICY),
@@ -55,6 +57,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putString(KEY_PROVIDER_COOKIE_INPUTS, cookieInputsJson(settings.providerCookieInputs))
                 .putString(KEY_PROVIDER_HEADER_INPUTS, headerInputsJson(settings.providerHeaderInputs))
                 .putStringSet(KEY_ENABLED_PROVIDER_IDS, settings.enabledProviderIds)
+                .putString(KEY_PROVIDER_ORDER_IDS, stringListJson(settings.providerOrderIds))
                 .putInt(KEY_AUDIO_CACHE_LIMIT_MB, settings.audioCacheLimitMb)
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
@@ -148,6 +151,23 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         return preferences.getStringSet(key, emptySet()).orEmpty().filter { it.isNotBlank() }.toSet()
     }
 
+    private fun readStringList(key: String): List<String> {
+        val raw = preferences.getString(key, null).orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            List(array.length()) { index -> array.optString(index) }
+                .filter { it.isNotBlank() }
+                .distinct()
+        }.getOrDefault(emptyList())
+    }
+
+    private fun stringListJson(values: List<String>): String {
+        val array = JSONArray()
+        values.filter { it.isNotBlank() }.distinct().forEach { array.put(it) }
+        return array.toString()
+    }
+
     private fun android.content.SharedPreferences.Editor.putNullableString(key: String, value: String?) =
         if (value == null) remove(key) else putString(key, value)
 
@@ -165,6 +185,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_PROVIDER_COOKIE_INPUTS = "provider_cookie_inputs"
         private const val KEY_PROVIDER_HEADER_INPUTS = "provider_header_inputs"
         private const val KEY_ENABLED_PROVIDER_IDS = "enabled_provider_ids"
+        private const val KEY_PROVIDER_ORDER_IDS = "provider_order_ids"
         private const val KEY_AUDIO_CACHE_LIMIT_MB = "audio_cache_limit_mb"
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"

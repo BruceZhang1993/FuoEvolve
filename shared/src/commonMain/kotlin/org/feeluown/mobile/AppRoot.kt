@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -1336,29 +1337,10 @@ private fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ProviderSwitchPanel(controller)
-            Text(
-                text = "Provider 登录",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
             if (controller.providers.isEmpty()) {
-                ProviderContentMessage("Provider 正在初始化")
+                ProviderContentMessage("音源正在初始化")
             } else {
-                if (controller.providers.size > 1) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        controller.providers.forEach { provider ->
-                            FilterChip(
-                                selected = controller.selectedSettingsProviderId == provider.providerId,
-                                onClick = { controller.onSettingsProviderChange(provider.providerId) },
-                                label = { Text(provider.providerName) },
-                            )
-                        }
-                    }
-                }
-                controller.selectedSettingsProvider()?.let { provider ->
+                controller.orderedProviders().forEach { provider ->
                     ProviderLoginPanel(
                         controller = controller,
                         provider = provider,
@@ -1390,14 +1372,15 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Provider 开关",
+                text = "音源",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             if (controller.availableProviders.isEmpty()) {
-                ProviderContentMessage("Provider 正在初始化")
+                ProviderContentMessage("音源正在初始化")
             } else {
-                controller.availableProviders.forEach { provider ->
+                val orderedProviders = controller.orderedAvailableProviders()
+                orderedProviders.forEachIndexed { index, provider ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1414,6 +1397,20 @@ private fun ProviderSwitchPanel(controller: FuoPlayerController) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                enabled = !controller.isLoading && index > 0,
+                                onClick = { controller.moveProvider(provider.providerId, -1) },
+                            ) {
+                                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移${provider.providerName}")
+                            }
+                            IconButton(
+                                enabled = !controller.isLoading && index < orderedProviders.lastIndex,
+                                onClick = { controller.moveProvider(provider.providerId, 1) },
+                            ) {
+                                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移${provider.providerName}")
+                            }
                         }
                         Checkbox(
                             checked = controller.isProviderEnabled(provider.providerId),
@@ -2922,7 +2919,7 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
     }
     return listOfNotNull(
         when (track.sourceType) {
-            TrackSourceType.Provider -> track.providerName ?: track.source.ifBlank { "Provider" }
+            TrackSourceType.Provider -> track.providerName ?: track.source.ifBlank { "音源" }
             TrackSourceType.LocalMediaStore -> "本地"
             TrackSourceType.Downloaded -> track.providerName ?: "FeelUOwn"
         },

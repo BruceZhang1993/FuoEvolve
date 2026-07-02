@@ -26,6 +26,7 @@ enum class AudioQualityPolicy(
 
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
+    val mineSection: MineSection = MineSection.Playlists,
     val localMusicViewMode: LocalMusicViewMode = LocalMusicViewMode.All,
     val excludedLocalMusicDirectoryIds: Set<String> = emptySet(),
     val localMusicMinDurationSeconds: Int = DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS,
@@ -141,11 +142,16 @@ data class ProviderInfo(
 enum class ProviderFeatureCategory {
     Recommend,
     Music,
+    MinePlaylists,
+    MineFavoritePlaylists,
+    Mine,
 }
 
 enum class ProviderContentType {
     Songs,
     Playlists,
+    Artists,
+    Albums,
 }
 
 data class ProviderFeature(
@@ -168,10 +174,26 @@ data class ProviderPlaylist(
     val playCount: Long? = null,
 )
 
+enum class ProviderMediaItemType {
+    Artist,
+    Album,
+}
+
+data class ProviderMediaItem(
+    val id: String,
+    val title: String,
+    val providerId: String,
+    val providerName: String,
+    val type: ProviderMediaItemType,
+    val coverUrl: String? = null,
+    val description: String = "",
+)
+
 data class ProviderContentSection(
     val feature: ProviderFeature,
     val tracks: List<MusicTrack> = emptyList(),
     val playlists: List<ProviderPlaylist> = emptyList(),
+    val mediaItems: List<ProviderMediaItem> = emptyList(),
     val isLoginRequired: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -189,6 +211,7 @@ interface ProviderMusicRepository {
     suspend fun loadFeature(feature: ProviderFeature): ProviderContentSection
     suspend fun loadMoreFeatureTracks(feature: ProviderFeature): List<MusicTrack> = loadFeature(feature).tracks
     suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack>
+    suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack>
 }
 
 interface LocalMusicRepository {

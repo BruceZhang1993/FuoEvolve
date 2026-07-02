@@ -163,6 +163,23 @@ class AndroidFuoCoreBridge(
         }
     }
 
+    override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
+        initialize()
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "mediaItemTracks start itemId=${item.id} title=${item.title}")
+                val raw = requireNotNull(bridge).callAttr("media_item_tracks", item.id).toString()
+                val array = JSONObject(raw).getJSONArray("tracks")
+                List(array.length()) { index -> array.getJSONObject(index).toTrack() }.also {
+                    Log.d(TAG, "mediaItemTracks done itemId=${item.id} count=${it.size}")
+                }
+            } catch (throwable: Throwable) {
+                Log.e(TAG, "mediaItemTracks failed itemId=${item.id}", throwable)
+                throw throwable
+            }
+        }
+    }
+
     private fun JSONObject.toProviderInfo(): ProviderInfo {
         val providerId = optString("provider_id")
         return ProviderInfo(
@@ -194,10 +211,12 @@ class AndroidFuoCoreBridge(
         val parsedFeature = optJSONObject("feature")?.toFeature() ?: fallbackFeature
         val tracksArray = optJSONArray("tracks") ?: JSONArray()
         val playlistsArray = optJSONArray("playlists") ?: JSONArray()
+        val mediaItemsArray = optJSONArray("media_items") ?: JSONArray()
         return ProviderContentSection(
             feature = parsedFeature,
             tracks = List(tracksArray.length()) { index -> tracksArray.getJSONObject(index).toTrack() },
             playlists = List(playlistsArray.length()) { index -> playlistsArray.getJSONObject(index).toPlaylist() },
+            mediaItems = List(mediaItemsArray.length()) { index -> mediaItemsArray.getJSONObject(index).toMediaItem() },
             isLoginRequired = optBoolean("is_login_required"),
             errorMessage = optString("error_message").takeIf { it.isNotBlank() },
         )
@@ -213,6 +232,19 @@ class AndroidFuoCoreBridge(
             coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
             description = optString("description"),
             playCount = optLong("play_count").takeIf { it > 0 },
+        )
+    }
+
+    private fun JSONObject.toMediaItem(): ProviderMediaItem {
+        val providerId = optString("provider_id")
+        return ProviderMediaItem(
+            id = getString("id"),
+            title = optString("title"),
+            providerId = providerId,
+            providerName = optString("provider_name").ifBlank { providerId },
+            type = ProviderMediaItemType.valueOf(optString("type")),
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() },
+            description = optString("description"),
         )
     }
 

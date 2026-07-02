@@ -229,6 +229,46 @@ FEATURE_DEFS = {
             "requires_login": False,
             "action": "toplist_list",
         },
+        {
+            "id": "netease_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "netease_favorite_songs",
+            "title": "收藏歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_fav_create_songs_rd",
+        },
+        {
+            "id": "netease_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+        {
+            "id": "netease_favorite_artists",
+            "title": "收藏歌手",
+            "category": "Mine",
+            "content_type": "Artists",
+            "requires_login": True,
+            "action": "current_user_fav_create_artists_rd",
+        },
+        {
+            "id": "netease_favorite_albums",
+            "title": "收藏专辑",
+            "category": "Mine",
+            "content_type": "Albums",
+            "requires_login": True,
+            "action": "current_user_fav_create_albums_rd",
+        },
     ],
     "qqmusic": [
         {
@@ -262,6 +302,46 @@ FEATURE_DEFS = {
             "content_type": "Songs",
             "requires_login": True,
             "action": "current_user_list_radio_songs",
+        },
+        {
+            "id": "qqmusic_user_playlists",
+            "title": "我的歌单",
+            "category": "MinePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_list_playlists",
+        },
+        {
+            "id": "qqmusic_favorite_songs",
+            "title": "收藏歌曲",
+            "category": "Mine",
+            "content_type": "Songs",
+            "requires_login": True,
+            "action": "current_user_fav_create_songs_rd",
+        },
+        {
+            "id": "qqmusic_favorite_playlists",
+            "title": "收藏歌单",
+            "category": "MineFavoritePlaylists",
+            "content_type": "Playlists",
+            "requires_login": True,
+            "action": "current_user_fav_create_playlists_rd",
+        },
+        {
+            "id": "qqmusic_favorite_artists",
+            "title": "收藏歌手",
+            "category": "Mine",
+            "content_type": "Artists",
+            "requires_login": True,
+            "action": "current_user_fav_create_artists_rd",
+        },
+        {
+            "id": "qqmusic_favorite_albums",
+            "title": "收藏专辑",
+            "category": "Mine",
+            "content_type": "Albums",
+            "requires_login": True,
+            "action": "current_user_fav_create_albums_rd",
         },
     ],
 }
@@ -298,6 +378,7 @@ class FuoMobileBridge:
         self.provider_registry.load()
         self._tracks: Dict[str, Any] = {}
         self._playlists: Dict[str, Any] = {}
+        self._media_items: Dict[str, Any] = {}
         self._restore_saved_logins()
 
     def providers(self) -> str:
@@ -375,19 +456,21 @@ class FuoMobileBridge:
                     "feature": feature_payload,
                     "tracks": [],
                     "playlists": [],
+                    "media_items": [],
                     "is_login_required": True,
                     "error_message": "",
                 },
                 ensure_ascii=False,
             )
         try:
-            tracks, playlists, title = self._load_feature_content(provider, feature)
+            tracks, playlists, media_items, title = self._load_feature_content(provider, feature)
             if title:
                 feature_payload["title"] = title
             payload = {
                 "feature": feature_payload,
                 "tracks": tracks,
                 "playlists": playlists,
+                "media_items": media_items,
                 "is_login_required": False,
                 "error_message": "",
             }
@@ -396,6 +479,7 @@ class FuoMobileBridge:
                 "feature": feature_payload,
                 "tracks": [],
                 "playlists": [],
+                "media_items": [],
                 "is_login_required": False,
                 "error_message": str(exc) or exc.__class__.__name__,
             }
@@ -416,6 +500,22 @@ class FuoMobileBridge:
         bridge_log(f"playlist_tracks done playlist_id={playlist_id} count={len(tracks)}")
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
+    def media_item_tracks(self, item_id: str) -> str:
+        bridge_log(f"media_item_tracks start item_id={item_id}")
+        item_type, provider_id, _ = self._parse_media_item_id(item_id)
+        item = self._media_item_from_id(item_id)
+        provider = self._get_provider(provider_id)
+        if item_type == "artist":
+            reader = provider.artist_create_songs_rd(item)
+        elif item_type == "album":
+            reader = provider.album_create_songs_rd(item)
+        else:
+            raise RuntimeError(f"unsupported media item type: {item_type}")
+        songs = read_models(reader, limit=300)
+        tracks = [self._remember_song(song) for song in songs]
+        bridge_log(f"media_item_tracks done item_id={item_id} count={len(tracks)}")
+        return json.dumps({"tracks": tracks}, ensure_ascii=False)
+
     def _get_provider(self, provider_id: str):
         provider = self.app.library.get(provider_id)
         if provider is None:
@@ -433,20 +533,35 @@ class FuoMobileBridge:
         action = feature["action"]
         if action == "rec_list_daily_songs":
             songs = read_models(provider.rec_list_daily_songs(), limit=50)
-            return [self._remember_song(song) for song in songs], [], ""
+            return [self._remember_song(song) for song in songs], [], [], ""
         if action == "rec_list_daily_playlists":
             playlists = read_models(provider.rec_list_daily_playlists(), limit=30)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], ""
+            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
         if action == "current_user_list_radio_songs":
             songs = provider.current_user_list_radio_songs(20)
-            return [self._remember_song(song) for song in songs], [], ""
+            return [self._remember_song(song) for song in songs], [], [], ""
         if action == "toplist_list":
             playlists = read_models(provider.toplist_list(), limit=50)
-            return [], [self._remember_playlist(playlist) for playlist in playlists], ""
+            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
         if action == "rec_a_collection_of_songs":
             collection = provider.rec_a_collection_of_songs()
             songs = read_models(getattr(collection, "models", []) or [], limit=50)
-            return [self._remember_song(song) for song in songs], [], getattr(collection, "name", "")
+            return [self._remember_song(song) for song in songs], [], [], getattr(collection, "name", "")
+        if action == "current_user_fav_create_songs_rd":
+            songs = read_models(provider.current_user_fav_create_songs_rd(), limit=100)
+            return [self._remember_song(song) for song in songs], [], [], ""
+        if action == "current_user_fav_create_playlists_rd":
+            playlists = read_models(provider.current_user_fav_create_playlists_rd(), limit=60)
+            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+        if action == "current_user_list_playlists":
+            playlists = read_models(provider.current_user_list_playlists(), limit=60)
+            return [], [self._remember_playlist(playlist) for playlist in playlists], [], ""
+        if action == "current_user_fav_create_artists_rd":
+            artists = read_models(provider.current_user_fav_create_artists_rd(), limit=60)
+            return [], [], [self._remember_media_item(artist, "artist") for artist in artists], ""
+        if action == "current_user_fav_create_albums_rd":
+            albums = read_models(provider.current_user_fav_create_albums_rd(), limit=60)
+            return [], [], [self._remember_media_item(album, "album") for album in albums], ""
         raise RuntimeError(f"unsupported feature action: {action}")
 
     def _playlist_from_id(self, playlist_id: str):
@@ -461,6 +576,28 @@ class FuoMobileBridge:
         playlist = provider.playlist_get(identifier)
         self._playlists[playlist_id] = playlist
         return playlist
+
+    def _media_item_from_id(self, item_id: str):
+        item = self._media_items.get(item_id)
+        if item is not None:
+            return item
+        item_type, provider_id, identifier = self._parse_media_item_id(item_id)
+        provider = self._get_provider(provider_id)
+        if item_type == "artist":
+            item = provider.artist_get(identifier)
+        elif item_type == "album":
+            item = provider.album_get(identifier)
+        else:
+            raise RuntimeError(f"unsupported media item type: {item_type}")
+        self._media_items[item_id] = item
+        return item
+
+    def _parse_media_item_id(self, item_id: str):
+        try:
+            item_type, provider_id, identifier = item_id.split(":", 2)
+        except ValueError as exc:
+            raise RuntimeError(f"invalid media item id: {item_id}") from exc
+        return item_type, provider_id, identifier
 
     def _song_from_track_id(self, track_id: str):
         try:
@@ -480,6 +617,11 @@ class FuoMobileBridge:
     def _remember_playlist(self, playlist) -> Dict[str, Any]:
         data = playlist_to_dict(playlist, self.app.library)
         self._playlists[data["id"]] = playlist
+        return data
+
+    def _remember_media_item(self, item, item_type: str) -> Dict[str, Any]:
+        data = media_item_to_dict(item, item_type, self.app.library)
+        self._media_items[data["id"]] = item
         return data
 
     def _save_login(self, provider_id: str, user, cookies: Dict[str, str]) -> None:
@@ -744,6 +886,20 @@ def playlist_to_dict(playlist, library: Library) -> Dict[str, Any]:
         "cover_url": display(playlist, "cover") or "",
         "description": display(playlist, "description") or display(playlist, "creator_name"),
         "play_count": play_count(playlist),
+    }
+
+
+def media_item_to_dict(item, item_type: str, library: Library) -> Dict[str, Any]:
+    source = getattr(item, "source", "")
+    identifier = getattr(item, "identifier", "")
+    return {
+        "id": f"{item_type}:{source}:{identifier}",
+        "title": display(item, "name") or display(item, "title"),
+        "provider_id": source,
+        "provider_name": provider_name(library.get(source)),
+        "type": "Artist" if item_type == "artist" else "Album",
+        "cover_url": display(item, "pic_url") or display(item, "cover") or display(item, "cover_url"),
+        "description": display(item, "description") or display(item, "artists_name"),
     }
 
 

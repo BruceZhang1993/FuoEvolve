@@ -9,8 +9,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     private val preferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     override suspend fun load(): AppSettings = withContext(Dispatchers.IO) {
+        val rawHomeSection = preferences.getString(KEY_HOME_SECTION, null)
         AppSettings(
-            homeSection = enumValue(KEY_HOME_SECTION, HomeSection.Recommend),
+            homeSection = homeSectionValue(rawHomeSection),
+            mineSection = mineSectionValue(rawHomeSection),
             localMusicViewMode = enumValue(KEY_LOCAL_MUSIC_VIEW_MODE, LocalMusicViewMode.All),
             excludedLocalMusicDirectoryIds = readStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS),
             localMusicMinDurationSeconds = preferences.getInt(
@@ -36,6 +38,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         withContext(Dispatchers.IO) {
             preferences.edit()
                 .putString(KEY_HOME_SECTION, settings.homeSection.name)
+                .putString(KEY_MINE_SECTION, settings.mineSection.name)
                 .putString(KEY_LOCAL_MUSIC_VIEW_MODE, settings.localMusicViewMode.name)
                 .putStringSet(KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS, settings.excludedLocalMusicDirectoryIds)
                 .putInt(KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS, settings.localMusicMinDurationSeconds)
@@ -55,6 +58,16 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     private inline fun <reified T : Enum<T>> enumValue(key: String, fallback: T): T {
         val raw = preferences.getString(key, null) ?: return fallback
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(fallback)
+    }
+
+    private fun homeSectionValue(raw: String?): HomeSection {
+        if (raw == "Local") return HomeSection.Mine
+        return runCatching { enumValueOf<HomeSection>(raw.orEmpty()) }.getOrDefault(HomeSection.Recommend)
+    }
+
+    private fun mineSectionValue(rawHomeSection: String?): MineSection {
+        if (rawHomeSection == "Local") return MineSection.LocalMusic
+        return enumValue(KEY_MINE_SECTION, MineSection.Playlists)
     }
 
     private fun readCookieInputs(): Map<String, String> {
@@ -95,6 +108,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
     private companion object {
         private const val PREFS_NAME = "fuo_settings"
         private const val KEY_HOME_SECTION = "home_section"
+        private const val KEY_MINE_SECTION = "mine_section"
         private const val KEY_LOCAL_MUSIC_VIEW_MODE = "local_music_view_mode"
         private const val KEY_EXCLUDED_LOCAL_MUSIC_DIRECTORY_IDS = "excluded_local_music_directory_ids"
         private const val KEY_LOCAL_MUSIC_MIN_DURATION_SECONDS = "local_music_min_duration_seconds"

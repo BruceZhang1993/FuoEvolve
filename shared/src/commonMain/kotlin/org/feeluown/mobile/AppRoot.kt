@@ -117,8 +117,10 @@ fun AppRoot(
         val destination = appDestination(controller)
         val currentFeature = controller.selectedFeature
         val currentPlaylist = controller.selectedPlaylist
+        val currentMediaItem = controller.selectedMediaItem
         var lastFeature by remember { mutableStateOf<ProviderFeature?>(null) }
         var lastPlaylist by remember { mutableStateOf<ProviderPlaylist?>(null) }
+        var lastMediaItem by remember { mutableStateOf<ProviderMediaItem?>(null) }
 
         LaunchedEffect(currentFeature) {
             if (currentFeature != null) {
@@ -128,6 +130,11 @@ fun AppRoot(
         LaunchedEffect(currentPlaylist) {
             if (currentPlaylist != null) {
                 lastPlaylist = currentPlaylist
+            }
+        }
+        LaunchedEffect(currentMediaItem) {
+            if (currentMediaItem != null) {
+                lastMediaItem = currentMediaItem
             }
         }
 
@@ -156,6 +163,7 @@ fun AppRoot(
                     AppDestination.Search -> SearchScreen(controller)
                     AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
                     AppDestination.Playlist -> ProviderPlaylistScreen(controller, currentPlaylist ?: lastPlaylist)
+                    AppDestination.MediaItem -> ProviderMediaItemScreen(controller, currentMediaItem ?: lastMediaItem)
                 }
             }
             AnimatedVisibility(
@@ -177,6 +185,7 @@ private enum class AppDestination {
     Search,
     Settings,
     DebugLogs,
+    MediaItem,
 }
 
 private fun appDestination(controller: FuoPlayerController): AppDestination {
@@ -185,6 +194,7 @@ private fun appDestination(controller: FuoPlayerController): AppDestination {
         controller.isSettingsOpen -> AppDestination.Settings
         controller.isSearchOpen -> AppDestination.Search
         controller.selectedFeature != null -> AppDestination.Feature
+        controller.selectedMediaItem != null -> AppDestination.MediaItem
         controller.selectedPlaylist != null -> AppDestination.Playlist
         else -> AppDestination.Home
     }
@@ -250,7 +260,7 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
     val sections = listOf(
         HomeSection.Recommend to "推荐",
         HomeSection.Music to "探索",
-        HomeSection.Local to "本地音乐",
+        HomeSection.Mine to "我的",
     )
     val selectedIndex = sections.indexOfFirst { it.first == controller.homeSection }.coerceAtLeast(0)
     val pagerState = rememberPagerState(
@@ -308,7 +318,7 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
                     section = HomeSection.Music,
                     modifier = Modifier.fillMaxSize(),
                 )
-                HomeSection.Local -> LocalMusicSection(
+                HomeSection.Mine -> MineHomeSection(
                     controller = controller,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -730,6 +740,72 @@ private fun ProviderPlaylistCard(
 }
 
 @Composable
+private fun ProviderMediaItemGrid(
+    items: List<ProviderMediaItem>,
+    onClick: (ProviderMediaItem) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                row.forEach { item ->
+                    ProviderMediaItemCard(
+                        item = item,
+                        onClick = { onClick(item) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                repeat(3 - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderMediaItemCard(
+    item: ProviderMediaItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        CoverBox(
+            track = item.toDisplayTrack(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title.ifBlank { if (item.type == ProviderMediaItemType.Artist) "未知歌手" else "未知专辑" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = listOf(
+                item.providerName,
+                if (item.type == ProviderMediaItemType.Artist) "歌手" else "专辑",
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun ProviderFeatureHeader(
     feature: ProviderFeature,
     providerLabel: String = feature.providerName,
@@ -811,6 +887,19 @@ private fun ProviderPlaylist.toDisplayTrack(): MusicTrack {
     )
 }
 
+private fun ProviderMediaItem.toDisplayTrack(): MusicTrack {
+    return MusicTrack(
+        id = id,
+        title = title,
+        artists = providerName,
+        album = if (type == ProviderMediaItemType.Artist) "歌手" else "专辑",
+        source = providerId,
+        sourceType = TrackSourceType.Provider,
+        coverUrl = coverUrl,
+        providerName = providerName,
+    )
+}
+
 @Composable
 private fun ProviderLockedSummary(providerNames: List<String>, onClick: () -> Unit) {
     val label = providerNames.joinToString("、")
@@ -854,6 +943,224 @@ private fun ProviderContentMessage(message: String) {
 @Composable
 private fun EmptyProviderContentHint(title: String) {
     ProviderContentMessage("$title 暂无内容")
+}
+
+@Composable
+private fun MineHomeSection(controller: FuoPlayerController, modifier: Modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "我的",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(
+                onClick = {
+                    when (controller.mineSection) {
+                        MineSection.Playlists -> controller.refreshMinePlaylistContent()
+                        MineSection.Favorites -> controller.refreshMineContent()
+                        MineSection.LocalMusic -> controller.refreshLocalMusic()
+                    }
+                },
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = "刷新我的")
+            }
+        }
+        MineSectionChips(controller)
+        when (controller.mineSection) {
+            MineSection.Playlists -> MinePlaylistsSection(
+                controller = controller,
+                modifier = Modifier.weight(1f),
+            )
+            MineSection.Favorites -> MineFavoritesSection(
+                controller = controller,
+                modifier = Modifier.weight(1f),
+            )
+            MineSection.LocalMusic -> LocalMusicSection(
+                controller = controller,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MineSectionChips(controller: FuoPlayerController) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = controller.mineSection == MineSection.Playlists,
+            onClick = { controller.onMineSectionChange(MineSection.Playlists) },
+            label = { Text("歌单") },
+        )
+        FilterChip(
+            selected = controller.mineSection == MineSection.Favorites,
+            onClick = { controller.onMineSectionChange(MineSection.Favorites) },
+            label = { Text("收藏") },
+        )
+        FilterChip(
+            selected = controller.mineSection == MineSection.LocalMusic,
+            onClick = { controller.onMineSectionChange(MineSection.LocalMusic) },
+            label = { Text("本地") },
+        )
+    }
+}
+
+@Composable
+private fun MinePlaylistsSection(controller: FuoPlayerController, modifier: Modifier) {
+    val userSections = controller.minePlaylistSections
+    val favoriteSections = controller.mineFavoritePlaylistSections
+    val sections = userSections + favoriteSections
+    val visibleSections = remember(sections) { sections.filterNot { it.isLoginRequired } }
+    val lockedProviderNames = remember(sections) {
+        sections.filter { it.isLoginRequired }
+            .map { it.feature.providerName }
+            .distinct()
+    }
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (sections.isEmpty()) {
+            item {
+                EmptyProviderContentHint("歌单")
+            }
+        } else {
+            visibleSections.filter { it.feature.category == ProviderFeatureCategory.MinePlaylists }
+                .forEach { contentSection ->
+                    playlistSectionItems(controller, contentSection)
+                }
+            visibleSections.filter { it.feature.category == ProviderFeatureCategory.MineFavoritePlaylists }
+                .forEach { contentSection ->
+                    playlistSectionItems(controller, contentSection)
+                }
+            if (lockedProviderNames.isNotEmpty()) {
+                item(key = "locked-providers:mine-playlists") {
+                    ProviderLockedSummary(
+                        providerNames = lockedProviderNames,
+                        onClick = controller::openSettings,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.playlistSectionItems(
+    controller: FuoPlayerController,
+    contentSection: ProviderContentSection,
+) {
+    item(key = "header:${contentSection.feature.id}") {
+        ProviderFeatureHeader(feature = contentSection.feature)
+    }
+    when {
+        contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+            ProviderContentMessage(contentSection.errorMessage)
+        }
+        contentSection.playlists.isNotEmpty() -> {
+            item(key = "playlists:${contentSection.feature.id}") {
+                ProviderPlaylistGrid(
+                    playlists = contentSection.playlists,
+                    onClick = controller::openPlaylist,
+                )
+            }
+        }
+        else -> item(key = "empty:${contentSection.feature.id}") {
+            ProviderContentMessage("暂无内容")
+        }
+    }
+}
+
+@Composable
+private fun MineFavoritesSection(controller: FuoPlayerController, modifier: Modifier) {
+    val sections = controller.mineSections
+    val visibleSections = remember(sections) {
+        sections.filterNot { it.isLoginRequired || it.feature.contentType == ProviderContentType.Playlists }
+    }
+    val lockedProviderNames = remember(sections) {
+        sections.filter { it.isLoginRequired }
+            .map { it.feature.providerName }
+            .distinct()
+    }
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (sections.isEmpty()) {
+            item {
+                EmptyProviderContentHint("我的收藏")
+            }
+        } else {
+            visibleSections.forEach { contentSection ->
+                item(key = "header:${contentSection.feature.id}") {
+                    ProviderFeatureHeader(
+                        feature = contentSection.feature,
+                        onPlayAll = if (contentSection.tracks.isNotEmpty()) {
+                            { controller.playAllFromFeature(contentSection.feature.id) }
+                        } else {
+                            null
+                        },
+                    )
+                }
+                when {
+                    contentSection.errorMessage != null -> item(key = "error:${contentSection.feature.id}") {
+                        ProviderContentMessage(contentSection.errorMessage)
+                    }
+                    contentSection.tracks.isNotEmpty() -> {
+                        itemsIndexed(
+                            contentSection.tracks,
+                            key = { _, item -> "${contentSection.feature.id}:${item.id}" },
+                        ) { index, track ->
+                            TrackRow(
+                                track = track,
+                                downloadState = controller.downloadStates[track.id],
+                                onClick = { controller.playFromFeature(contentSection.feature.id, index) },
+                                onDownload = { controller.download(track) },
+                                onDeleteDownload = { controller.deleteDownload(track) },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                    contentSection.playlists.isNotEmpty() -> {
+                        item(key = "playlists:${contentSection.feature.id}") {
+                            ProviderPlaylistGrid(
+                                playlists = contentSection.playlists,
+                                onClick = controller::openPlaylist,
+                            )
+                        }
+                    }
+                    contentSection.mediaItems.isNotEmpty() -> {
+                        item(key = "media-items:${contentSection.feature.id}") {
+                            ProviderMediaItemGrid(
+                                items = contentSection.mediaItems,
+                                onClick = controller::openMediaItem,
+                            )
+                        }
+                    }
+                    else -> item(key = "empty:${contentSection.feature.id}") {
+                        ProviderContentMessage("暂无内容")
+                    }
+                }
+            }
+            if (lockedProviderNames.isNotEmpty()) {
+                item(key = "locked-providers:mine") {
+                    ProviderLockedSummary(
+                        providerNames = lockedProviderNames,
+                        onClick = controller::openSettings,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1702,12 +2009,118 @@ private fun ProviderPlaylistScreen(controller: FuoPlayerController, playlist: Pr
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderMediaItemScreen(controller: FuoPlayerController, item: ProviderMediaItem?) {
+    item ?: return
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = item.title.ifBlank {
+                            if (item.type == ProviderMediaItemType.Artist) "歌手" else "专辑"
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeMediaItem) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (controller.playbackState.currentTrack != null) {
+                MiniPlayer(controller)
+            }
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            LoadingIndicator(controller.isLoading)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = listOf(
+                        item.providerName,
+                        if (item.type == ProviderMediaItemType.Artist) "歌手" else "专辑",
+                        "${controller.selectedMediaItemTracks.size} 首",
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (controller.selectedMediaItemTracks.isNotEmpty()) {
+                    PlayAllButton(onClick = controller::playAllFromSelectedMediaItem)
+                }
+            }
+            if (item.description.isNotBlank()) {
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (controller.selectedMediaItemError != null) {
+                ProviderContentMessage(controller.selectedMediaItemError.orEmpty())
+            } else if (controller.isLoading && controller.selectedMediaItemTracks.isEmpty()) {
+                Text(
+                    text = controller.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (controller.selectedMediaItemTracks.isEmpty() && !controller.isLoading && controller.selectedMediaItemError == null) {
+                    item {
+                        ProviderContentMessage("暂无歌曲")
+                    }
+                } else {
+                    itemsIndexed(controller.selectedMediaItemTracks, key = { _, track -> track.id }) { index, track ->
+                        TrackRow(
+                            track = track,
+                            downloadState = controller.downloadStates[track.id],
+                            onClick = { controller.playFromSelectedMediaItem(index) },
+                            onDownload = { controller.download(track) },
+                            onDeleteDownload = { controller.deleteDownload(track) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SearchScreen(controller: FuoPlayerController) {
     Scaffold(
         topBar = {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding(),
                 tonalElevation = 3.dp,
             ) {
                 Column(
@@ -1764,13 +2177,6 @@ private fun SearchScreen(controller: FuoPlayerController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             LoadingIndicator(controller.isLoading)
-            Text(
-                text = controller.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)

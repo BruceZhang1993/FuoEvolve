@@ -410,10 +410,206 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun switchingToMineLoadsUserPlaylistSectionsByDefault() = runTest {
+        val playlistFeature = ProviderFeature(
+            id = "netease_user_playlists",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "我的歌单",
+            category = ProviderFeatureCategory.MinePlaylists,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = true,
+        )
+        val favoritePlaylistFeature = ProviderFeature(
+            id = "netease_favorite_playlists",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "收藏歌单",
+            category = ProviderFeatureCategory.MineFavoritePlaylists,
+            contentType = ProviderContentType.Playlists,
+            requiresLogin = true,
+        )
+        val playlists = listOf(
+            ProviderPlaylist(
+                id = "playlist:netease:1",
+                title = "我创建的歌单",
+                providerId = "netease",
+                providerName = "网易云音乐",
+            ),
+        )
+        val favoritePlaylists = listOf(
+            ProviderPlaylist(
+                id = "playlist:netease:2",
+                title = "我收藏的歌单",
+                providerId = "netease",
+                providerName = "网易云音乐",
+            ),
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(playlistFeature, favoritePlaylistFeature),
+            featureSections = mapOf(
+                playlistFeature.id to ProviderContentSection(playlistFeature, playlists = playlists),
+                favoritePlaylistFeature.id to ProviderContentSection(
+                    favoritePlaylistFeature,
+                    playlists = favoritePlaylists,
+                ),
+            ),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onHomeSectionChange(HomeSection.Mine)
+            advanceUntilIdle()
+
+            assertEquals(MineSection.Playlists, controller.mineSection)
+            assertEquals(listOf(playlistFeature.id, favoritePlaylistFeature.id), provider.loadedFeatureIds)
+            assertEquals(playlists, controller.minePlaylistSections.first().playlists)
+            assertEquals(favoritePlaylists, controller.mineFavoritePlaylistSections.first().playlists)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun switchingToMineLoadsFavoriteSections() = runTest {
+        val favoriteFeature = ProviderFeature(
+            id = "netease_favorite_songs",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "收藏歌曲",
+            category = ProviderFeatureCategory.Mine,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val favoriteTracks = listOf(providerTrack("provider:1", "Favorite"))
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(favoriteFeature),
+            featureSections = mapOf(favoriteFeature.id to ProviderContentSection(favoriteFeature, tracks = favoriteTracks)),
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onHomeSectionChange(HomeSection.Mine)
+            controller.onMineSectionChange(MineSection.Favorites)
+            advanceUntilIdle()
+
+            assertEquals(listOf(favoriteFeature.id), provider.loadedFeatureIds)
+            assertEquals(favoriteTracks, controller.mineSections.first().tracks)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun mineFavoriteSectionsFollowProviderAuthState() = runTest {
+        val favoriteFeature = ProviderFeature(
+            id = "netease_favorite_songs",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "收藏歌曲",
+            category = ProviderFeatureCategory.Mine,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(favoriteFeature),
+            initialIsLoggedIn = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onHomeSectionChange(HomeSection.Mine)
+            controller.onMineSectionChange(MineSection.Favorites)
+            advanceUntilIdle()
+
+            assertEquals(true, controller.mineSections.first().isLoginRequired)
+
+            controller.loginProviderWithCookies("netease", """{"MUSIC_U":"saved"}""")
+            advanceUntilIdle()
+
+            assertEquals(false, controller.mineSections.first().isLoginRequired)
+
+            controller.logoutProvider("netease")
+            advanceUntilIdle()
+
+            assertEquals(true, controller.mineSections.first().isLoginRequired)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
+    fun mediaItemDetailLoadsTracksAndCanPlayAll() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val mediaItem = ProviderMediaItem(
+            id = "artist:netease:1",
+            title = "Artist",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            type = ProviderMediaItemType.Artist,
+        )
+        val provider = FakeProviderRepository(emptyList(), mediaItemTracks = tracks)
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.openMediaItem(mediaItem)
+            advanceUntilIdle()
+            controller.playAllFromSelectedMediaItem()
+            advanceUntilIdle()
+
+            assertEquals(listOf(mediaItem.id), provider.loadedMediaItemIds)
+            assertEquals(tracks, controller.selectedMediaItemTracks)
+            assertEquals("provider:1", engine.lastTrack?.id)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun restoresAndPersistsSettings() = runTest {
         val store = FakeSettingsStore(
             AppSettings(
-                homeSection = HomeSection.Local,
+                homeSection = HomeSection.Mine,
+                mineSection = MineSection.LocalMusic,
                 localMusicViewMode = LocalMusicViewMode.Album,
                 excludedLocalMusicDirectoryIds = setOf("Podcasts/"),
                 localMusicMinDurationSeconds = 30,
@@ -444,7 +640,8 @@ class FuoPlayerControllerTest {
 
             advanceUntilIdle()
 
-            assertEquals(HomeSection.Local, controller.homeSection)
+            assertEquals(HomeSection.Mine, controller.homeSection)
+            assertEquals(MineSection.LocalMusic, controller.mineSection)
             assertEquals(LocalMusicViewMode.Album, controller.localMusicViewMode)
             assertEquals(setOf("Podcasts/"), controller.excludedLocalMusicDirectoryIds)
             assertEquals(30, controller.localMusicMinDurationSeconds)
@@ -461,6 +658,7 @@ class FuoPlayerControllerTest {
 
             controller.onProviderLoginModeChange(ProviderLoginMode.WebView)
             controller.onProviderCookiesChange("netease", """{"MUSIC_U":"draft"}""")
+            controller.onMineSectionChange(MineSection.Favorites)
             controller.onLocalMusicDirectoryEnabledChange("Podcasts/", enabled = true)
             controller.onLocalMusicMinDurationChange(60)
             controller.onAudioCacheLimitChange(1024)
@@ -471,6 +669,7 @@ class FuoPlayerControllerTest {
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
             assertEquals("""{"MUSIC_U":"draft"}""", store.saved.providerCookieInputs["netease"])
+            assertEquals(MineSection.Favorites, store.saved.mineSection)
             assertEquals(emptySet(), store.saved.excludedLocalMusicDirectoryIds)
             assertEquals(60, store.saved.localMusicMinDurationSeconds)
             assertEquals(LocalMusicScanSettings(emptySet(), 60), local.lastSettings)
@@ -568,6 +767,7 @@ class FuoPlayerControllerTest {
     private class FakeProviderRepository(
         private val tracks: List<MusicTrack>,
         private val playlistTracks: List<MusicTrack> = emptyList(),
+        private val mediaItemTracks: List<MusicTrack> = emptyList(),
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
@@ -580,6 +780,7 @@ class FuoPlayerControllerTest {
         var lastCellularAudioQualityPolicy: AudioQualityPolicy? = null
         val loadedFeatureIds = mutableListOf<String>()
         val loadedMoreFeatureIds = mutableListOf<String>()
+        val loadedMediaItemIds = mutableListOf<String>()
 
         override suspend fun initialize() = Unit
 
@@ -640,6 +841,11 @@ class FuoPlayerControllerTest {
         }
 
         override suspend fun playlistTracks(playlist: ProviderPlaylist): List<MusicTrack> = playlistTracks
+
+        override suspend fun mediaItemTracks(item: ProviderMediaItem): List<MusicTrack> {
+            loadedMediaItemIds += item.id
+            return mediaItemTracks
+        }
     }
 
     private class FakeLocalMusicRepository(

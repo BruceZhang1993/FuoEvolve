@@ -2645,6 +2645,11 @@ private fun PlayerInfoTags(track: MusicTrack?, audioQuality: String?) {
     ) {
         if (track != null) {
             InfoTag(sourceLabel(track, null))
+            if (track.isSmartReplacement) {
+                track.originalProviderName?.takeIf { it.isNotBlank() }?.let {
+                    InfoTag("原：$it")
+                }
+            }
         }
         audioQuality?.takeIf { it.isNotBlank() }?.let {
             InfoTag(it.uppercase())
@@ -2954,6 +2959,7 @@ private fun sourceLabel(track: MusicTrack, downloadState: DownloadState?): Strin
             TrackSourceType.LocalMediaStore -> "本地"
             TrackSourceType.Downloaded -> track.providerName ?: "FeelUOwn"
         },
+        "智能替换".takeIf { track.isSmartReplacement },
         state,
     ).joinToString(" · ")
 }

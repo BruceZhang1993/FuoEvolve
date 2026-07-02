@@ -46,6 +46,53 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun smartReplacementPayloadUpdatesCurrentPlaybackTrack() = runTest {
+        val origin = providerTrack("provider:1", "First")
+        val provider = FakeProviderRepository(
+            listOf(origin),
+            resolveHandler = { track, _ ->
+                PlaybackPayload(
+                    url = "https://example.com/replacement.mp3",
+                    title = "Replacement",
+                    artists = "Other Artist",
+                    album = "Other Album",
+                    source = "qqmusic",
+                    providerName = "QQ 音乐",
+                    isSmartReplacement = true,
+                    originalTitle = track.title,
+                    originalProviderName = track.providerName,
+                )
+            },
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("first")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals("Replacement", engine.lastTrack?.title)
+            assertEquals("QQ 音乐", engine.lastTrack?.providerName)
+            assertEquals(true, engine.lastTrack?.isSmartReplacement)
+            assertEquals("First", engine.lastTrack?.originalTitle)
+            assertEquals("网易云音乐", engine.lastTrack?.originalProviderName)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun nextUsesKotlinQueueOrder() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),

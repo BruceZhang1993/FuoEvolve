@@ -882,6 +882,10 @@ class FuoMobileBridge:
         try:
             media, quality = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
+            bridge_log(
+                "media not found "
+                f"track={song_log_label(song)} allow_standby={allow_standby} policy={audio_select_policy}"
+            )
             if allow_standby:
                 standby_payload = self._prepare_standby_payload(song, audio_select_policy)
                 if standby_payload is not None:
@@ -894,8 +898,11 @@ class FuoMobileBridge:
         source = getattr(song, "source", "")
         source_in = [provider_id for provider_id in self.provider_registry.provider_ids if provider_id != source]
         if not source_in:
+            bridge_log(f"standby skipped no source track={song_log_label(song)}")
             return None
-        bridge_log(f"standby start song={getattr(song, 'title', '')} source_in={source_in}")
+        bridge_log(
+            f"standby start track={song_log_label(song)} source_in={source_in} policy={audio_select_policy}"
+        )
         try:
             standby_list = asyncio.run(
                 self.app.library.a_list_song_standby_v2(
@@ -906,21 +913,23 @@ class FuoMobileBridge:
                 )
             )
         except Exception as exc:  # pylint: disable=broad-except
-            bridge_log(f"standby failed: {exc}")
+            bridge_log(f"standby failed track={song_log_label(song)} error={exc}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         if not standby_list:
-            bridge_log("standby empty")
+            bridge_log(f"standby empty track={song_log_label(song)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         standby, _ = standby_list[0]
         self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
         bridge_log(
-            f"standby selected source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+            f"standby selected origin={song_log_label(song)} replacement={song_log_label(standby)}"
         )
         try:
             media, quality = self._select_media(standby, audio_select_policy)
         except MediaNotFound:
+            bridge_log(f"standby selected media not found replacement={song_log_label(standby)}")
             return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
-        return self._payload_from_media(standby, media, quality)
+        payload = self._payload_from_media(standby, media, quality)
+        return self._mark_standby_payload(payload, song, standby, "library", None)
 
     def _prepare_search_standby_payload(
         self,
@@ -931,6 +940,7 @@ class FuoMobileBridge:
         candidates = []
         seen = set()
         for query in standby_queries(song):
+            bridge_log(f"search standby query track={song_log_label(song)} query={query} source_in={source_in}")
             for result in self.app.library.search(query, type_in=[SearchType.so], source_in=source_in):
                 for standby in read_models(getattr(result, "songs", []) or [], limit=10):
                     key = (getattr(standby, "source", ""), getattr(standby, "identifier", ""))
@@ -939,22 +949,29 @@ class FuoMobileBridge:
                     seen.add(key)
                     score = standby_score(song, standby)
                     if score >= 0.55:
+                        bridge_log(
+                            f"search standby candidate score={score:.2f} replacement={song_log_label(standby)}"
+                        )
                         candidates.append((score, standby))
         if not candidates:
-            bridge_log("search standby empty")
+            bridge_log(f"search standby empty track={song_log_label(song)}")
             return None
         for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True)[:8]:
             try:
                 media, quality = self._select_media(standby, audio_select_policy)
             except MediaNotFound:
+                bridge_log(
+                    f"search standby candidate media not found score={score:.2f} replacement={song_log_label(standby)}"
+                )
                 continue
             self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
             bridge_log(
-                "search standby selected "
-                f"score={score:.2f} source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+                f"search standby selected score={score:.2f} "
+                f"origin={song_log_label(song)} replacement={song_log_label(standby)}"
             )
-            return self._payload_from_media(standby, media, quality)
-        bridge_log("search standby media empty")
+            payload = self._payload_from_media(standby, media, quality)
+            return self._mark_standby_payload(payload, song, standby, "search", score)
+        bridge_log(f"search standby media empty track={song_log_label(song)} candidates={len(candidates)}")
         return None
 
     def _select_media(self, song, audio_select_policy: str):
@@ -968,13 +985,55 @@ class FuoMobileBridge:
         payload = media_to_payload(media, song_to_metadata(song, self.app.library))
         if quality:
             payload["audio_quality"] = quality
-        cover = normalize_image_url(self.app.library.model_get_cover(song))
+        cover = self._get_cover(song)
         if cover:
             payload["cover_url"] = cover
         lyrics = self._get_lyrics(song)
         if lyrics:
             payload["lyrics"] = lyrics
         return payload
+
+    def _mark_standby_payload(
+        self,
+        payload: Dict[str, Any],
+        origin,
+        standby,
+        strategy: str,
+        score: Optional[float],
+    ) -> Dict[str, Any]:
+        origin_provider = provider_name(self.app.library.get(getattr(origin, "source", "")))
+        standby_provider = provider_name(self.app.library.get(getattr(standby, "source", "")))
+        payload.update(
+            {
+                "smart_replacement": True,
+                "standby_strategy": strategy,
+                "original_id": f"{getattr(origin, 'source', '')}:{getattr(origin, 'identifier', '')}",
+                "original_title": display(origin, "title"),
+                "original_artists": display_artists(origin),
+                "original_source": getattr(origin, "source", ""),
+                "original_provider_name": origin_provider,
+                "replacement_id": f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}",
+                "replacement_title": display(standby, "title"),
+                "replacement_artists": display_artists(standby),
+                "replacement_source": getattr(standby, "source", ""),
+                "replacement_provider_name": standby_provider,
+            }
+        )
+        if score is not None:
+            payload["standby_score"] = round(score, 2)
+        bridge_log(
+            f"standby payload ready strategy={strategy} "
+            f"origin={song_log_label(origin)} replacement={song_log_label(standby)} "
+            f"quality={payload.get('audio_quality', '')}"
+        )
+        return payload
+
+    def _get_cover(self, song) -> str:
+        try:
+            return normalize_image_url(self.app.library.model_get_cover(song))
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"cover lookup failed: {exc}")
+            return ""
 
     def _get_lyrics(self, song) -> str:
         try:
@@ -1093,6 +1152,7 @@ def song_to_metadata(song, library: Library) -> Dict[str, Any]:
         "artists": data["artists"],
         "album": data["album"],
         "source": data["source"],
+        "provider_name": data["provider_name"],
         "duration_ms": data["duration_ms"],
         "cover_url": data["cover_url"],
     }
@@ -1136,6 +1196,7 @@ def media_to_payload(media: Media, metadata: Optional[Dict[str, Any]] = None) ->
         "artists": metadata.get("artists", ""),
         "album": metadata.get("album", ""),
         "source": metadata.get("source", ""),
+        "provider_name": metadata.get("provider_name", ""),
         "headers": dict(media.http_headers or {}),
         "cover_url": normalize_image_url(metadata.get("cover_url", "")),
         "duration_ms": metadata.get("duration_ms", 0),
@@ -1247,6 +1308,14 @@ def provider_name(provider) -> str:
     if provider is None:
         return ""
     return getattr(provider, "name", getattr(provider, "identifier", ""))
+
+
+def song_log_label(song) -> str:
+    source = getattr(song, "source", "")
+    identifier = getattr(song, "identifier", "")
+    title = display(song, "title")
+    artists = display_artists(song)
+    return f"{source}:{identifier} title={title} artists={artists}"
 
 
 def duration_ms(song) -> int:

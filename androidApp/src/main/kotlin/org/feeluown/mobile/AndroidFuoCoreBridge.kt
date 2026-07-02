@@ -100,7 +100,7 @@ class AndroidFuoCoreBridge(
                     )
                     .toString()
                 JSONObject(raw).toPayload(track).also {
-                    Log.d(TAG, "resolve done title=${it.title}")
+                    Log.d(TAG, it.resolveLog(trackId))
                 }
             } catch (throwable: Throwable) {
                 Log.e(TAG, "resolve failed trackId=$trackId", throwable)
@@ -296,18 +296,40 @@ class AndroidFuoCoreBridge(
         )
     }
 
-    private fun JSONObject.toPayload(track: MusicTrack): PlaybackPayload = PlaybackPayload(
-        url = getString("url"),
-        title = optString("title").ifBlank { track.title },
-        artists = optString("artists").ifBlank { track.artists },
-        album = optString("album").ifBlank { track.album },
-        source = optString("source").ifBlank { track.source },
-        headers = optJSONObject("headers").toStringMap(),
-        coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
-        durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
-        lyrics = optString("lyrics").takeIf { it.isNotBlank() },
-        audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
-    )
+    private fun JSONObject.toPayload(track: MusicTrack): PlaybackPayload {
+        val smartReplacement = optBoolean("smart_replacement", false)
+        return PlaybackPayload(
+            url = getString("url"),
+            title = optString("title").ifBlank { track.title },
+            artists = optString("artists").ifBlank { track.artists },
+            album = optString("album").ifBlank { track.album },
+            source = optString("source").ifBlank { track.source },
+            headers = optJSONObject("headers").toStringMap(),
+            coverUrl = optString("cover_url").takeIf { it.isNotBlank() } ?: track.coverUrl,
+            durationMs = optLong("duration_ms").takeIf { it > 0 } ?: track.durationMs,
+            lyrics = optString("lyrics").takeIf { it.isNotBlank() },
+            audioQuality = optString("audio_quality").takeIf { it.isNotBlank() },
+            providerName = optString("replacement_provider_name")
+                .takeIf { smartReplacement && it.isNotBlank() }
+                ?: optString("provider_name").takeIf { it.isNotBlank() }
+                ?: track.providerName,
+            isSmartReplacement = smartReplacement,
+            originalTitle = optString("original_title").takeIf { smartReplacement && it.isNotBlank() },
+            originalProviderName = optString("original_provider_name").takeIf { smartReplacement && it.isNotBlank() },
+            replacementStrategy = optString("standby_strategy").takeIf { smartReplacement && it.isNotBlank() },
+            replacementScore = optDouble("standby_score").takeIf { smartReplacement && has("standby_score") },
+        )
+    }
+
+    private fun PlaybackPayload.resolveLog(trackId: String): String {
+        if (!isSmartReplacement) {
+            return "resolve done trackId=$trackId title=$title source=$source quality=${audioQuality.orEmpty()}"
+        }
+        return "resolve done smartReplacement trackId=$trackId strategy=${replacementStrategy.orEmpty()} " +
+            "score=${replacementScore?.toString().orEmpty()} " +
+            "original=${originalProviderName.orEmpty()}:${originalTitle.orEmpty()} " +
+            "replacement=${providerName.orEmpty()}:$title source=$source quality=${audioQuality.orEmpty()}"
+    }
 
     private fun JSONObject.toAuthState(providerId: String): ProviderAuthState = ProviderAuthState(
         providerId = optString("provider_id").ifBlank { providerId },

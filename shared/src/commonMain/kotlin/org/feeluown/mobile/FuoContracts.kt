@@ -91,6 +91,9 @@ data class MusicTrack(
     val lyrics: String? = null,
     val providerId: String? = null,
     val providerName: String? = null,
+    val isSmartReplacement: Boolean = false,
+    val originalTitle: String? = null,
+    val originalProviderName: String? = null,
 )
 
 data class PlaybackPayload(
@@ -104,6 +107,12 @@ data class PlaybackPayload(
     val durationMs: Long? = null,
     val lyrics: String? = null,
     val audioQuality: String? = null,
+    val providerName: String? = null,
+    val isSmartReplacement: Boolean = false,
+    val originalTitle: String? = null,
+    val originalProviderName: String? = null,
+    val replacementStrategy: String? = null,
+    val replacementScore: Double? = null,
 )
 
 enum class PlayerStatus {

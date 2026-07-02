@@ -1162,8 +1162,16 @@ class FuoPlayerController(
                     ?: providerRepository.resolve(playbackTrack, unavailablePlaybackPolicy)
                 if (requestSerial != playRequestSerial) return@playRequest
                 val playableTrack = playbackTrack.copy(
+                    title = payload.title.ifBlank { playbackTrack.title },
+                    artists = payload.artists.ifBlank { playbackTrack.artists },
+                    album = payload.album.ifBlank { playbackTrack.album },
+                    source = payload.source.ifBlank { playbackTrack.source },
                     coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
                     durationMs = payload.durationMs ?: playbackTrack.durationMs,
+                    providerName = payload.providerName ?: playbackTrack.providerName,
+                    isSmartReplacement = payload.isSmartReplacement,
+                    originalTitle = payload.originalTitle,
+                    originalProviderName = payload.originalProviderName,
                 )
                 queue = sourceQueue.mapIndexed { itemIndex, item ->
                     if (itemIndex == index) playableTrack else item
@@ -1314,6 +1322,10 @@ class FuoPlayerController(
             durationMs = durationMs,
             lyrics = lyrics,
             audioQuality = null,
+            providerName = providerName,
+            isSmartReplacement = isSmartReplacement,
+            originalTitle = originalTitle,
+            originalProviderName = originalProviderName,
         )
     }
 

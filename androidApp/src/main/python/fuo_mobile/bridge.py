@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import unicodedata
 import sys
 import types
 from dataclasses import dataclass
@@ -406,13 +407,13 @@ class FuoMobileBridge:
                 tracks.append(track)
         return json.dumps({"tracks": tracks}, ensure_ascii=False)
 
-    def resolve(self, track_id: str, audio_select_policy: str = "") -> str:
+    def resolve(self, track_id: str, audio_select_policy: str = "", allow_standby: bool = True) -> str:
         song = self._tracks.get(track_id)
         if song is None:
             song = self._song_from_track_id(track_id)
             self._tracks[track_id] = song
         policy = audio_select_policy or self.app.config.AUDIO_SELECT_POLICY
-        payload = self._prepare_payload(song, policy)
+        payload = self._prepare_payload(song, policy, allow_standby)
         return json.dumps(payload, ensure_ascii=False)
 
     def play(self, track_id: str) -> str:
@@ -692,13 +693,14 @@ class FuoMobileBridge:
             provider.auth(user)
             bridge_log(f"restore login ok provider_id={provider_id} user={getattr(user, 'name', '')}")
 
-    def _prepare_payload(self, song, audio_select_policy: str) -> Dict[str, Any]:
+    def _prepare_payload(self, song, audio_select_policy: str, allow_standby: bool) -> Dict[str, Any]:
         try:
             media, quality = self._select_media(song, audio_select_policy)
         except MediaNotFound as exc:
-            standby_payload = self._prepare_standby_payload(song, audio_select_policy)
-            if standby_payload is not None:
-                return standby_payload
+            if allow_standby:
+                standby_payload = self._prepare_standby_payload(song, audio_select_policy)
+                if standby_payload is not None:
+                    return standby_payload
             raise RuntimeError(f"media not found: {song}") from exc
         payload = self._payload_from_media(song, media, quality)
         return payload
@@ -720,10 +722,10 @@ class FuoMobileBridge:
             )
         except Exception as exc:  # pylint: disable=broad-except
             bridge_log(f"standby failed: {exc}")
-            return None
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         if not standby_list:
             bridge_log("standby empty")
-            return None
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         standby, _ = standby_list[0]
         self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
         bridge_log(
@@ -732,8 +734,43 @@ class FuoMobileBridge:
         try:
             media, quality = self._select_media(standby, audio_select_policy)
         except MediaNotFound:
-            return None
+            return self._prepare_search_standby_payload(song, audio_select_policy, source_in)
         return self._payload_from_media(standby, media, quality)
+
+    def _prepare_search_standby_payload(
+        self,
+        song,
+        audio_select_policy: str,
+        source_in: List[str],
+    ) -> Optional[Dict[str, Any]]:
+        candidates = []
+        seen = set()
+        for query in standby_queries(song):
+            for result in self.app.library.search(query, type_in=[SearchType.so], source_in=source_in):
+                for standby in read_models(getattr(result, "songs", []) or [], limit=10):
+                    key = (getattr(standby, "source", ""), getattr(standby, "identifier", ""))
+                    if key in seen or key == (getattr(song, "source", ""), getattr(song, "identifier", "")):
+                        continue
+                    seen.add(key)
+                    score = standby_score(song, standby)
+                    if score >= 0.55:
+                        candidates.append((score, standby))
+        if not candidates:
+            bridge_log("search standby empty")
+            return None
+        for score, standby in sorted(candidates, key=lambda item: item[0], reverse=True)[:8]:
+            try:
+                media, quality = self._select_media(standby, audio_select_policy)
+            except MediaNotFound:
+                continue
+            self._tracks[f"{getattr(standby, 'source', '')}:{getattr(standby, 'identifier', '')}"] = standby
+            bridge_log(
+                "search standby selected "
+                f"score={score:.2f} source={getattr(standby, 'source', '')} title={display(standby, 'title')}"
+            )
+            return self._payload_from_media(standby, media, quality)
+        bridge_log("search standby media empty")
+        return None
 
     def _select_media(self, song, audio_select_policy: str):
         provider = self.app.library.get(getattr(song, "source", ""))
@@ -948,6 +985,69 @@ def display_album(song) -> str:
     if album is None:
         return ""
     return display(album, "name")
+
+
+def standby_queries(song) -> List[str]:
+    title = display(song, "title").strip()
+    artists = display_artists(song).strip()
+    queries = []
+    if title and artists:
+        queries.append(f"{title} {artists}")
+    if title:
+        queries.append(title)
+    return unique_texts(queries)
+
+
+def standby_score(origin, standby) -> float:
+    origin_title = normalize_match_text(display(origin, "title"))
+    standby_title = normalize_match_text(display(standby, "title"))
+    if not origin_title or not standby_title:
+        return 0.0
+    if origin_title == standby_title:
+        score = 0.55
+    elif (
+        len(origin_title) >= 4
+        and len(standby_title) >= 4
+        and (origin_title in standby_title or standby_title in origin_title)
+    ):
+        score = 0.35
+    else:
+        return 0.0
+
+    origin_artists = normalize_match_text(display_artists(origin))
+    standby_artists = normalize_match_text(display_artists(standby))
+    if origin_artists and standby_artists:
+        if origin_artists == standby_artists:
+            score += 0.25
+        elif origin_artists in standby_artists or standby_artists in origin_artists:
+            score += 0.15
+
+    origin_album = normalize_match_text(display_album(origin))
+    standby_album = normalize_match_text(display_album(standby))
+    if origin_album and standby_album and origin_album == standby_album:
+        score += 0.10
+
+    origin_duration = duration_ms(origin)
+    standby_duration = duration_ms(standby)
+    if origin_duration and standby_duration:
+        if abs(origin_duration - standby_duration) / max(origin_duration, 1) < 0.10:
+            score += 0.10
+    return score
+
+
+def normalize_match_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    return "".join(char for char in normalized if char.isalnum())
+
+
+def unique_texts(values: List[str]) -> List[str]:
+    result = []
+    seen = set()
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
 
 
 def provider_name(provider) -> str:

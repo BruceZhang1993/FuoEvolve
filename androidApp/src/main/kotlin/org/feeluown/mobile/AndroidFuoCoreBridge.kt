@@ -71,14 +71,24 @@ class AndroidFuoCoreBridge(
         }
     }
 
-    override suspend fun resolve(track: MusicTrack): PlaybackPayload {
+    override suspend fun resolve(
+        track: MusicTrack,
+        unavailablePolicy: UnavailablePlaybackPolicy,
+    ): PlaybackPayload {
         initialize()
         return withContext(Dispatchers.IO) {
             val trackId = track.providerId ?: track.id
             try {
                 val policy = currentAudioQualityPolicy()
-                Log.d(TAG, "resolve start trackId=$trackId policy=${policy.policy}")
-                val raw = requireNotNull(bridge).callAttr("resolve", trackId, policy.policy).toString()
+                Log.d(TAG, "resolve start trackId=$trackId policy=${policy.policy} unavailablePolicy=$unavailablePolicy")
+                val raw = requireNotNull(bridge)
+                    .callAttr(
+                        "resolve",
+                        trackId,
+                        policy.policy,
+                        unavailablePolicy == UnavailablePlaybackPolicy.SmartReplace,
+                    )
+                    .toString()
                 JSONObject(raw).toPayload(track).also {
                     Log.d(TAG, "resolve done title=${it.title}")
                 }

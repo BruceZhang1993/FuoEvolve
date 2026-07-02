@@ -24,6 +24,13 @@ enum class AudioQualityPolicy(
     Low("低流量", "lq<>"),
 }
 
+enum class UnavailablePlaybackPolicy(
+    val label: String,
+) {
+    SmartReplace("智能替换"),
+    Skip("跳过"),
+}
+
 data class AppSettings(
     val homeSection: HomeSection = HomeSection.Recommend,
     val mineSection: MineSection = MineSection.Playlists,
@@ -39,6 +46,7 @@ data class AppSettings(
     val imageCacheLimitMb: Int = DEFAULT_IMAGE_CACHE_LIMIT_MB,
     val wifiAudioQualityPolicy: AudioQualityPolicy = DEFAULT_WIFI_AUDIO_QUALITY_POLICY,
     val cellularAudioQualityPolicy: AudioQualityPolicy = DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
+    val unavailablePlaybackPolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
 )
 
 const val DEFAULT_AUDIO_CACHE_LIMIT_MB = 512
@@ -46,6 +54,7 @@ const val DEFAULT_IMAGE_CACHE_LIMIT_MB = 128
 const val DEFAULT_LOCAL_MUSIC_MIN_DURATION_SECONDS = 0
 val DEFAULT_WIFI_AUDIO_QUALITY_POLICY = AudioQualityPolicy.High
 val DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY = AudioQualityPolicy.Standard
+val DEFAULT_UNAVAILABLE_PLAYBACK_POLICY = UnavailablePlaybackPolicy.SmartReplace
 
 data class LocalMusicScanSettings(
     val excludedDirectoryIds: Set<String> = emptySet(),
@@ -202,7 +211,10 @@ interface ProviderMusicRepository {
     suspend fun initialize()
     suspend fun providers(): List<ProviderInfo>
     suspend fun search(keyword: String, providerId: String? = null): List<MusicTrack>
-    suspend fun resolve(track: MusicTrack): PlaybackPayload
+    suspend fun resolve(
+        track: MusicTrack,
+        unavailablePolicy: UnavailablePlaybackPolicy = DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
+    ): PlaybackPayload
     suspend fun authState(providerId: String): ProviderAuthState
     suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState
     suspend fun logout(providerId: String): ProviderAuthState

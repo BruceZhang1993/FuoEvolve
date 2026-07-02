@@ -79,6 +79,45 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun skipUnavailablePolicyPlaysNextTrackWhenResolveMediaIsMissing() = runTest {
+        val tracks = listOf(
+            providerTrack("provider:1", "First"),
+            providerTrack("provider:2", "Second"),
+        )
+        val provider = FakeProviderRepository(
+            tracks = tracks,
+            resolveFailures = setOf("provider:1"),
+        )
+        val engine = FakePlaybackEngine()
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = engine,
+                settingsStore = FakeSettingsStore(
+                    AppSettings(unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip),
+                ),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+            controller.onQueryChange("song")
+            controller.onSearchScopeChange(SearchScope.Provider)
+            advanceUntilIdle()
+            controller.playFromSearch(0)
+            advanceUntilIdle()
+
+            assertEquals("provider:2", engine.lastTrack?.id)
+            assertEquals(PlayerStatus.Playing, controller.playbackState.status)
+            assertEquals(2, provider.resolveCount)
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun playAllFromSelectedPlaylistStartsFirstTrackAndKeepsQueue() = runTest {
         val tracks = listOf(
             providerTrack("provider:1", "First"),
@@ -619,6 +658,7 @@ class FuoPlayerControllerTest {
                 imageCacheLimitMb = 64,
                 wifiAudioQualityPolicy = AudioQualityPolicy.Highest,
                 cellularAudioQualityPolicy = AudioQualityPolicy.Low,
+                unavailablePlaybackPolicy = UnavailablePlaybackPolicy.Skip,
             ),
         )
         val provider = FakeProviderRepository(emptyList())
@@ -653,6 +693,7 @@ class FuoPlayerControllerTest {
             assertEquals(CacheLimit(256L * 1024L * 1024L, 64L * 1024L * 1024L), cache.lastLimit)
             assertEquals(AudioQualityPolicy.Highest, controller.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, controller.cellularAudioQualityPolicy)
+            assertEquals(UnavailablePlaybackPolicy.Skip, controller.unavailablePlaybackPolicy)
             assertEquals(AudioQualityPolicy.Highest, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Low, provider.lastCellularAudioQualityPolicy)
 
@@ -665,6 +706,7 @@ class FuoPlayerControllerTest {
             controller.onImageCacheLimitChange(256)
             controller.onWifiAudioQualityPolicyChange(AudioQualityPolicy.High)
             controller.onCellularAudioQualityPolicyChange(AudioQualityPolicy.Standard)
+            controller.onUnavailablePlaybackPolicyChange(UnavailablePlaybackPolicy.SmartReplace)
             advanceUntilIdle()
 
             assertEquals(ProviderLoginMode.WebView, store.saved.providerLoginMode)
@@ -678,6 +720,7 @@ class FuoPlayerControllerTest {
             assertEquals(CacheLimit(1024L * 1024L * 1024L, 256L * 1024L * 1024L), cache.lastLimit)
             assertEquals(AudioQualityPolicy.High, store.saved.wifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, store.saved.cellularAudioQualityPolicy)
+            assertEquals(UnavailablePlaybackPolicy.SmartReplace, store.saved.unavailablePlaybackPolicy)
             assertEquals(AudioQualityPolicy.High, provider.lastWifiAudioQualityPolicy)
             assertEquals(AudioQualityPolicy.Standard, provider.lastCellularAudioQualityPolicy)
         } finally {
@@ -771,6 +814,7 @@ class FuoPlayerControllerTest {
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
+        private val resolveFailures: Set<String> = emptySet(),
         initialIsLoggedIn: Boolean = true,
     ) : ProviderMusicRepository {
         private var isLoggedIn = initialIsLoggedIn
@@ -790,8 +834,14 @@ class FuoPlayerControllerTest {
 
         override suspend fun search(keyword: String, providerId: String?): List<MusicTrack> = tracks
 
-        override suspend fun resolve(track: MusicTrack): PlaybackPayload {
+        override suspend fun resolve(
+            track: MusicTrack,
+            unavailablePolicy: UnavailablePlaybackPolicy,
+        ): PlaybackPayload {
             resolveCount += 1
+            if (track.id in resolveFailures) {
+                throw RuntimeException("media not found: ${track.id}")
+            }
             return PlaybackPayload(
                 url = "https://example.com/${track.id}.mp3",
                 title = track.title,

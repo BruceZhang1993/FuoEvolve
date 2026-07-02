@@ -137,6 +137,8 @@ class FuoPlayerController(
         private set
     var cellularAudioQualityPolicy by mutableStateOf(DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY)
         private set
+    var unavailablePlaybackPolicy by mutableStateOf(DEFAULT_UNAVAILABLE_PLAYBACK_POLICY)
+        private set
     var debugLogLines by mutableStateOf<List<String>>(emptyList())
         private set
     var debugLogError by mutableStateOf<String?>(null)
@@ -447,6 +449,11 @@ class FuoPlayerController(
         cellularAudioQualityPolicy = value
         persistSettings()
         scope.launch { updateAudioQualityPolicies() }
+    }
+
+    fun onUnavailablePlaybackPolicyChange(value: UnavailablePlaybackPolicy) {
+        unavailablePlaybackPolicy = value
+        persistSettings()
     }
 
     fun onQueryChange(value: String) {
@@ -982,13 +989,15 @@ class FuoPlayerController(
         sourceQueue: List<MusicTrack>,
         index: Int,
         sourceFeature: ProviderFeature? = null,
+        skippedUnavailableCount: Int = 0,
     ) {
         scope.launch {
             isLoading = true
             message = "正在播放：${track.title}"
             runCatching {
                 val playbackTrack = track.preferDownloaded()
-                val payload = playbackTrack.toPayload() ?: providerRepository.resolve(playbackTrack)
+                val payload = playbackTrack.toPayload()
+                    ?: providerRepository.resolve(playbackTrack, unavailablePlaybackPolicy)
                 val playableTrack = playbackTrack.copy(
                     coverUrl = payload.coverUrl ?: playbackTrack.coverUrl,
                     durationMs = payload.durationMs ?: playbackTrack.durationMs,
@@ -1010,7 +1019,9 @@ class FuoPlayerController(
                 message = "${playableTrack.title} - ${playableTrack.artists}"
                 prefetchFeatureQueueIfNeeded()
             }.onFailure {
-                setError(it)
+                if (!skipUnavailableTrack(track, sourceQueue, index, sourceFeature, skippedUnavailableCount, it)) {
+                    setError(it)
+                }
             }
             isLoading = false
         }
@@ -1172,6 +1183,7 @@ class FuoPlayerController(
         imageCacheLimitMb = settings.imageCacheLimitMb
         wifiAudioQualityPolicy = settings.wifiAudioQualityPolicy
         cellularAudioQualityPolicy = settings.cellularAudioQualityPolicy
+        unavailablePlaybackPolicy = settings.unavailablePlaybackPolicy
     }
 
     private fun persistSettings() {
@@ -1190,6 +1202,7 @@ class FuoPlayerController(
             imageCacheLimitMb = imageCacheLimitMb,
             wifiAudioQualityPolicy = wifiAudioQualityPolicy,
             cellularAudioQualityPolicy = cellularAudioQualityPolicy,
+            unavailablePlaybackPolicy = unavailablePlaybackPolicy,
         )
         scope.launch {
             settingsStore.save(settings)
@@ -1238,6 +1251,44 @@ class FuoPlayerController(
         }
         playbackState = playbackState.copy(status = PlayerStatus.Error, errorMessage = message)
         isLoading = false
+    }
+
+    private fun skipUnavailableTrack(
+        track: MusicTrack,
+        sourceQueue: List<MusicTrack>,
+        index: Int,
+        sourceFeature: ProviderFeature?,
+        skippedUnavailableCount: Int,
+        throwable: Throwable,
+    ): Boolean {
+        if (unavailablePlaybackPolicy != UnavailablePlaybackPolicy.Skip || !throwable.isMediaNotFound()) {
+            return false
+        }
+        if (sourceQueue.size <= 1 || skippedUnavailableCount >= sourceQueue.lastIndex) {
+            return false
+        }
+        val nextIndex = (index + 1).floorMod(sourceQueue.size)
+        message = "已跳过不可用资源：${track.title}"
+        play(
+            track = sourceQueue[nextIndex],
+            sourceQueue = sourceQueue,
+            index = nextIndex,
+            sourceFeature = sourceFeature,
+            skippedUnavailableCount = skippedUnavailableCount + 1,
+        )
+        return true
+    }
+
+    private fun Throwable.isMediaNotFound(): Boolean {
+        val messages = mutableListOf<String>()
+        var current: Throwable? = this
+        while (current != null) {
+            current.message?.let { messages += it }
+            current = current.cause
+        }
+        val text = messages.joinToString(" ")
+        return text.contains("media not found", ignoreCase = true) ||
+            text.contains("MediaNotFound", ignoreCase = true)
     }
 
     private fun Int.floorMod(size: Int): Int = ((this % size) + size) % size

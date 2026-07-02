@@ -1367,6 +1367,7 @@ private fun SettingsScreen(
                 }
             }
             AudioQualitySettingsPanel(controller)
+            PlaybackPolicySettingsPanel(controller)
             LocalMusicScanSettingsPanel(controller)
             CacheSettingsPanel(controller)
             if (controller.isDebugLogViewerAvailable) {
@@ -1467,6 +1468,45 @@ private fun ProviderLoginPanel(
                         Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
                         Text(if (controller.isLoading) "登录中" else "登录")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackPolicySettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "播放策略",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "资源不可用时",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                UnavailablePlaybackPolicy.entries.forEachIndexed { index, policy ->
+                    SegmentedButton(
+                        selected = controller.unavailablePlaybackPolicy == policy,
+                        onClick = { controller.onUnavailablePlaybackPolicyChange(policy) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = UnavailablePlaybackPolicy.entries.size,
+                        ),
+                    ) {
+                        Text(policy.label)
                     }
                 }
             }

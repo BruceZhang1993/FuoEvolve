@@ -31,6 +31,10 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 KEY_CELLULAR_AUDIO_QUALITY_POLICY,
                 DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY,
             ),
+            unavailablePlaybackPolicy = enumValue(
+                KEY_UNAVAILABLE_PLAYBACK_POLICY,
+                DEFAULT_UNAVAILABLE_PLAYBACK_POLICY,
+            ),
         )
     }
 
@@ -51,6 +55,7 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
                 .putInt(KEY_IMAGE_CACHE_LIMIT_MB, settings.imageCacheLimitMb)
                 .putString(KEY_WIFI_AUDIO_QUALITY_POLICY, settings.wifiAudioQualityPolicy.name)
                 .putString(KEY_CELLULAR_AUDIO_QUALITY_POLICY, settings.cellularAudioQualityPolicy.name)
+                .putString(KEY_UNAVAILABLE_PLAYBACK_POLICY, settings.unavailablePlaybackPolicy.name)
                 .apply()
         }
     }
@@ -121,5 +126,6 @@ class AndroidAppSettingsStore(context: Context) : AppSettingsStore {
         private const val KEY_IMAGE_CACHE_LIMIT_MB = "image_cache_limit_mb"
         private const val KEY_WIFI_AUDIO_QUALITY_POLICY = "wifi_audio_quality_policy"
         private const val KEY_CELLULAR_AUDIO_QUALITY_POLICY = "cellular_audio_quality_policy"
+        private const val KEY_UNAVAILABLE_PLAYBACK_POLICY = "unavailable_playback_policy"
     }
 }

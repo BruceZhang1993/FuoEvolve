@@ -38,6 +38,7 @@ class FuoPlayerController(
     private val playbackEngine: PlaybackEngine,
     private val settingsStore: AppSettingsStore = NoOpAppSettingsStore,
     private val resourceCacheRepository: ResourceCacheRepository = NoOpResourceCacheRepository,
+    private val debugLogRepository: DebugLogRepository = NoOpDebugLogRepository,
     private val scope: CoroutineScope,
 ) {
     var providers by mutableStateOf<List<ProviderInfo>>(emptyList())
@@ -94,6 +95,8 @@ class FuoPlayerController(
         private set
     var isSettingsOpen by mutableStateOf(false)
         private set
+    var isDebugLogOpen by mutableStateOf(false)
+        private set
     var isQueueOpen by mutableStateOf(false)
         private set
     var isLoading by mutableStateOf(false)
@@ -114,8 +117,15 @@ class FuoPlayerController(
         private set
     var cellularAudioQualityPolicy by mutableStateOf(DEFAULT_CELLULAR_AUDIO_QUALITY_POLICY)
         private set
+    var debugLogLines by mutableStateOf<List<String>>(emptyList())
+        private set
+    var debugLogError by mutableStateOf<String?>(null)
+        private set
+    val isDebugLogViewerAvailable: Boolean
+        get() = debugLogRepository.isAvailable
     val canNavigateBack: Boolean
         get() = isFullPlayerOpen ||
+            isDebugLogOpen ||
             isSettingsOpen ||
             isSearchOpen ||
             selectedFeature != null ||
@@ -235,6 +245,10 @@ class FuoPlayerController(
                 closeFullPlayer()
                 true
             }
+            isDebugLogOpen -> {
+                closeDebugLogs()
+                true
+            }
             isSettingsOpen -> {
                 closeSettings()
                 true
@@ -264,6 +278,29 @@ class FuoPlayerController(
 
     fun closeSettings() {
         isSettingsOpen = false
+        isDebugLogOpen = false
+    }
+
+    fun openDebugLogs() {
+        if (!debugLogRepository.isAvailable) return
+        isDebugLogOpen = true
+        refreshDebugLogs()
+    }
+
+    fun closeDebugLogs() {
+        isDebugLogOpen = false
+    }
+
+    fun refreshDebugLogs() {
+        if (!debugLogRepository.isAvailable) return
+        scope.launch {
+            isLoading = true
+            debugLogError = null
+            runCatching { debugLogRepository.logLines() }
+                .onSuccess { debugLogLines = it }
+                .onFailure { debugLogError = it.message ?: it::class.simpleName.orEmpty() }
+            isLoading = false
+        }
     }
 
     fun onProviderCookiesChange(providerId: String, value: String) {
@@ -481,7 +518,9 @@ class FuoPlayerController(
                 }
                 withTimeout(30_000) {
                     providerFeatures.filter { it.category == category }.map { feature ->
-                        if (feature.isDeferredHomeFeature()) {
+                        if (feature.requiresLogin && !isProviderLoggedIn(feature.providerId)) {
+                            ProviderContentSection(feature, isLoginRequired = true)
+                        } else if (feature.isDeferredHomeFeature()) {
                             ProviderContentSection(feature)
                         } else {
                             runCatching { providerRepository.loadFeature(feature) }
@@ -753,15 +792,24 @@ class FuoPlayerController(
             ))
         }
         providerFeatures = providerRepository.features()
+        refreshProviderAuthStates()
     }
 
     private fun refreshAllProviderAuthStates() {
         scope.launch {
-            providers.forEach { provider ->
-                runCatching { providerRepository.authState(provider.providerId) }
-                    .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
-            }
+            refreshProviderAuthStates()
         }
+    }
+
+    private suspend fun refreshProviderAuthStates() {
+        providers.forEach { provider ->
+            runCatching { providerRepository.authState(provider.providerId) }
+                .onSuccess { providerAuthStates = providerAuthStates + (provider.providerId to it) }
+        }
+    }
+
+    private fun isProviderLoggedIn(providerId: String): Boolean {
+        return providerAuthStates[providerId]?.isLoggedIn == true
     }
 
     private fun play(

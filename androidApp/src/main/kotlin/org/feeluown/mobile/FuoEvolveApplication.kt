@@ -1,5 +1,6 @@
 package org.feeluown.mobile
 
+import android.content.pm.ApplicationInfo
 import com.chaquo.python.android.PyApplication
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,10 @@ class FuoEvolveApplication : PyApplication() {
         AndroidResourceCacheRepository(applicationContext)
     }
 
+    private val debugLogRepository: AndroidDebugLogRepository by lazy {
+        AndroidDebugLogRepository((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+    }
+
     val controller: FuoPlayerController by lazy {
         FuoPlayerController(
             providerRepository = providerRepository,
@@ -41,6 +46,7 @@ class FuoEvolveApplication : PyApplication() {
             playbackEngine = playbackEngine,
             settingsStore = settingsStore,
             resourceCacheRepository = resourceCacheRepository,
+            debugLogRepository = debugLogRepository,
             scope = appScope,
         ).also { controller ->
             FuoPlaybackService.transportControls = object : FuoPlaybackService.TransportControls {

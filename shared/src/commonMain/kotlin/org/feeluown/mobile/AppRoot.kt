@@ -26,9 +26,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -71,6 +75,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -89,11 +94,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -142,6 +151,7 @@ fun AppRoot(
                         hasAudioPermission = hasAudioPermission,
                         onRequestAudioPermission = onRequestAudioPermission,
                     )
+                    AppDestination.DebugLogs -> DebugLogScreen(controller)
                     AppDestination.Settings -> SettingsScreen(controller, onOpenProviderWebLogin, onLogoutProvider)
                     AppDestination.Search -> SearchScreen(controller)
                     AppDestination.Feature -> ProviderFeatureScreen(controller, currentFeature ?: lastFeature)
@@ -166,10 +176,12 @@ private enum class AppDestination {
     Playlist,
     Search,
     Settings,
+    DebugLogs,
 }
 
 private fun appDestination(controller: FuoPlayerController): AppDestination {
     return when {
+        controller.isDebugLogOpen -> AppDestination.DebugLogs
         controller.isSettingsOpen -> AppDestination.Settings
         controller.isSearchOpen -> AppDestination.Search
         controller.selectedFeature != null -> AppDestination.Feature
@@ -228,12 +240,6 @@ private fun HomeScreen(
                 PermissionPanel(onRequestAudioPermission)
             }
             LoadingIndicator(controller.isLoading)
-            Text(
-                text = controller.message,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
             HomeSectionPager(controller, Modifier.weight(1f))
         }
     }
@@ -277,7 +283,8 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
     ) {
         HomeSectionTabs(
             sections = sections,
-            selectedIndex = selectedIndex,
+            selectedIndex = pagerState.currentPage.coerceIn(0, sections.lastIndex),
+            indicatorOffsetFraction = pagerState.currentPageOffsetFraction,
             onClick = { index, section ->
                 controller.onHomeSectionChange(section)
                 scope.launch { pagerState.animateScrollToPage(index) }
@@ -314,6 +321,7 @@ private fun HomeSectionPager(controller: FuoPlayerController, modifier: Modifier
 private fun HomeSectionTabs(
     sections: List<Pair<HomeSection, String>>,
     selectedIndex: Int,
+    indicatorOffsetFraction: Float,
     onClick: (Int, HomeSection) -> Unit,
 ) {
     TabRow(
@@ -321,6 +329,25 @@ private fun HomeSectionTabs(
         modifier = Modifier.fillMaxWidth(),
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.primary,
+        indicator = { tabPositions ->
+            val current = tabPositions.getOrNull(selectedIndex) ?: return@TabRow
+            val targetIndex = when {
+                indicatorOffsetFraction > 0f -> (selectedIndex + 1).coerceAtMost(tabPositions.lastIndex)
+                indicatorOffsetFraction < 0f -> (selectedIndex - 1).coerceAtLeast(0)
+                else -> selectedIndex
+            }
+            val target = tabPositions[targetIndex]
+            val progress = indicatorOffsetFraction.absoluteValue.coerceIn(0f, 1f)
+            val indicatorLeft = lerp(current.left, target.left, progress)
+            val indicatorWidth = lerp(current.width, target.width, progress)
+            TabRowDefaults.SecondaryIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentSize(Alignment.BottomStart)
+                    .offset { IntOffset(indicatorLeft.roundToPx(), 0) }
+                    .width(indicatorWidth),
+            )
+        },
     ) {
         sections.forEachIndexed { index, (section, label) ->
             Tab(
@@ -1034,6 +1061,9 @@ private fun SettingsScreen(
             AudioQualitySettingsPanel(controller)
             LocalMusicScanSettingsPanel(controller)
             CacheSettingsPanel(controller)
+            if (controller.isDebugLogViewerAvailable) {
+                DebugSettingsPanel(controller)
+            }
         }
     }
 }
@@ -1336,6 +1366,96 @@ private fun CacheSettingsPanel(controller: FuoPlayerController) {
                     Icon(Icons.Filled.Delete, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
                     Text("清空缓存")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugSettingsPanel(controller: FuoPlayerController) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = controller::openDebugLogs),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.BugReport, contentDescription = null)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "应用日志",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "当前应用 info 及以上日志",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DebugLogScreen(controller: FuoPlayerController) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("应用日志") },
+                navigationIcon = {
+                    IconButton(onClick = controller::closeDebugLogs) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(
+                        enabled = !controller.isLoading,
+                        onClick = controller::refreshDebugLogs,
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                    }
+                },
+            )
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            LoadingIndicator(controller.isLoading)
+            controller.debugLogError?.let { ProviderContentMessage(it) }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (controller.debugLogLines.isEmpty() && !controller.isLoading && controller.debugLogError == null) {
+                    item {
+                        ProviderContentMessage("暂无日志")
+                    }
+                } else {
+                    itemsIndexed(controller.debugLogLines) { _, line ->
+                        Text(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }

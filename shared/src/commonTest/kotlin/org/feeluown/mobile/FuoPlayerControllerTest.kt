@@ -191,6 +191,68 @@ class FuoPlayerControllerTest {
     }
 
     @Test
+    fun loginRequiredDeferredHomeFeaturesFollowProviderAuthState() = runTest {
+        val dailyFeature = ProviderFeature(
+            id = "netease_daily_songs",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "每日推荐歌曲",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val radioFeature = ProviderFeature(
+            id = "netease_radio",
+            providerId = "netease",
+            providerName = "网易云音乐",
+            title = "私人 FM",
+            category = ProviderFeatureCategory.Recommend,
+            contentType = ProviderContentType.Songs,
+            requiresLogin = true,
+        )
+        val provider = FakeProviderRepository(
+            tracks = emptyList(),
+            features = listOf(dailyFeature, radioFeature),
+            initialIsLoggedIn = false,
+        )
+        val controllerScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        try {
+            val controller = FuoPlayerController(
+                providerRepository = provider,
+                localRepository = FakeLocalMusicRepository(),
+                downloadRepository = FakeDownloadRepository(emptyMap()),
+                playbackEngine = FakePlaybackEngine(),
+                scope = controllerScope,
+            )
+
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(true, true),
+                controller.recommendSections.map { it.isLoginRequired },
+            )
+
+            controller.loginProviderWithCookies("netease", """{"MUSIC_U":"saved"}""")
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(false, false),
+                controller.recommendSections.map { it.isLoginRequired },
+            )
+
+            controller.logoutProvider("netease")
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(true, true),
+                controller.recommendSections.map { it.isLoginRequired },
+            )
+        } finally {
+            controllerScope.cancel()
+        }
+    }
+
+    @Test
     fun privateFmAppendsMoreTracksBeforeQueueEnds() = runTest {
         val radioFeature = ProviderFeature(
             id = "netease_radio",
@@ -509,7 +571,9 @@ class FuoPlayerControllerTest {
         private val features: List<ProviderFeature> = emptyList(),
         private val featureSections: Map<String, ProviderContentSection> = emptyMap(),
         private val additionalFeatureTracks: Map<String, List<MusicTrack>> = emptyMap(),
+        initialIsLoggedIn: Boolean = true,
     ) : ProviderMusicRepository {
+        private var isLoggedIn = initialIsLoggedIn
         var resolveCount = 0
         var logoutCount = 0
         var lastWifiAudioQualityPolicy: AudioQualityPolicy? = null
@@ -536,27 +600,23 @@ class FuoPlayerControllerTest {
             )
         }
 
-        override suspend fun authState(providerId: String): ProviderAuthState = ProviderAuthState(
-            providerId = providerId,
-            providerName = providerId,
-            isLoggedIn = false,
-        )
-
-        override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState =
+        override suspend fun authState(providerId: String): ProviderAuthState =
             ProviderAuthState(
                 providerId = providerId,
                 providerName = providerId,
-                isLoggedIn = true,
-                userName = "tester",
+                isLoggedIn = isLoggedIn,
+                userName = "tester".takeIf { isLoggedIn },
             )
+
+        override suspend fun loginWithCookies(providerId: String, cookiesJson: String): ProviderAuthState {
+            isLoggedIn = true
+            return authState(providerId)
+        }
 
         override suspend fun logout(providerId: String): ProviderAuthState {
             logoutCount += 1
-            return ProviderAuthState(
-                providerId = providerId,
-                providerName = providerId,
-                isLoggedIn = false,
-            )
+            isLoggedIn = false
+            return authState(providerId)
         }
 
         override suspend fun updateAudioQualityPolicies(

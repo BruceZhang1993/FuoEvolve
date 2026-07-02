@@ -255,3 +255,14 @@ object NoOpResourceCacheRepository : ResourceCacheRepository {
 
     override suspend fun updateLimit(limit: CacheLimit) = Unit
 }
+
+interface DebugLogRepository {
+    val isAvailable: Boolean
+    suspend fun logLines(): List<String>
+}
+
+object NoOpDebugLogRepository : DebugLogRepository {
+    override val isAvailable: Boolean = false
+
+    override suspend fun logLines(): List<String> = emptyList()
+}

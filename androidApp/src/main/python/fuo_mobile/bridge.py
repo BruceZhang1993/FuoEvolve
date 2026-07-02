@@ -361,7 +361,7 @@ class FuoMobileBridge:
 
     def provider_logout(self, provider_id: str) -> str:
         provider = self._get_provider(provider_id)
-        provider.auth(None)
+        self._clear_provider_auth(provider_id, provider)
         self._delete_saved_login(provider_id)
         return json.dumps(provider_auth_state(provider, None), ensure_ascii=False)
 
@@ -505,6 +505,24 @@ class FuoMobileBridge:
 
             if os.path.exists(USER_INFO_FILE):
                 os.remove(USER_INFO_FILE)
+
+    def _clear_provider_auth(self, provider_id: str, provider) -> None:
+        try:
+            provider.auth(None)
+        except Exception as exc:  # pylint: disable=broad-except
+            bridge_log(f"provider auth(None) failed provider_id={provider_id}: {exc}")
+            setattr(provider, "_user", None)
+        if provider_id == "netease":
+            from fuo_netease.api import API
+            from fuo_netease.login_controller import LoginController
+
+            provider.api = API()
+            LoginController._api = provider.api
+        elif provider_id == "qqmusic":
+            provider.api.set_cookies(None)
+        current_user_changed = getattr(provider, "current_user_changed", None)
+        if current_user_changed is not None:
+            current_user_changed.emit(None)
 
     def _restore_saved_logins(self) -> None:
         for provider_id in self.provider_registry.provider_ids:
